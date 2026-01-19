@@ -1,0 +1,48 @@
+{
+	"name": "@tatzeroko/language-server",
+	"description": "Custom Language Server powering advanced code intelligence, navigation, and real-time feedback for Salesforce projects.",
+	"version": "0.1.0",
+	"author": "Tatzeroko Contributors",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/tatzeroko/language-tools.git"
+	},
+	"bugs": {
+		"url": "https://github.com/tatzeroko/language-tools/issues"
+	},
+	"homepage": "https://github.com/tatzeroko/language-tools#readme",
+	"packageManager": "pnpm@10.28.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"dist",
+		"bin"
+	],
+	"exports": {
+		".": {
+			"default": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		},
+		"./server": {
+			"default": "./bin/server.js"
+		}
+	},
+	"bin": {
+		"tatzeroko-language-server": "./bin/server.js"
+	},
+	"engines": {
+		"node": ">=18"
+	},
+	"scripts": {
+		"build": "tsc"
+	},
+	"dependencies": {
+		"vscode-languageserver": "^9.0.1",
+		"vscode-languageserver-textdocument": "^1.0.12"
+	},
+	"devDependencies": {
+		"@types/node": "^25.0.3",
+		"typescript": "^5.9.3"
+	}
+}

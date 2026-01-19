@@ -1,0 +1,62 @@
+{
+	"name": "tatzeroko-vscode",
+	"displayName": "Tatzeroko Language Tools",
+	"description": "Brings enhanced tooling and Salesforce-specific language features directly into your editor.",
+	"version": "0.0.0",
+	"author": "Tatzeroko Contributors",
+	"publisher": "tatzeroko",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/tatzeroko/language-tools.git"
+	},
+	"bugs": {
+		"url": "https://github.com/tatzeroko/language-tools/issues"
+	},
+	"homepage": "https://github.com/tatzeroko/language-tools#readme",
+	"packageManager": "pnpm@10.28.0",
+	"main": "./dist/extension.js",
+	"engines": {
+		"vscode": "^1.100.0"
+	},
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"contributes": {
+		"typescriptServerPlugins": [
+			{
+				"name": "@tatzeroko/typescript-plugin",
+				"enableForWorkspaceTypeScriptVersions": true
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "pnpm run package",
+		"compile": "pnpm run check-types && pnpm run lint && node esbuild.mjs",
+		"build": "pnpm run compile",
+		"watch": "npm-run-all -p watch:*",
+		"watch:esbuild": "node esbuild.mjs --watch",
+		"watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+		"package": "pnpm run check-types && pnpm run lint && node esbuild.mjs --production",
+		"check-types": "tsc --noEmit",
+		"lint": "biome check ./src",
+		"test": "vscode-test"
+	},
+	"dependencies": {
+		"@tatzeroko/language-server": "workspace:*",
+		"@tatzeroko/typescript-plugin": "workspace:*",
+		"vscode-languageclient": "^9.0.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.10",
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^25.0.3",
+		"@types/vscode": "^1.100.0",
+		"@vscode/test-cli": "^0.0.12",
+		"@vscode/test-electron": "^2.5.2",
+		"@vscode/vsce": "^3.7.1",
+		"esbuild": "^0.27.1",
+		"npm-run-all": "^4.1.5",
+		"typescript": "^5.9.3"
+	}
+}
