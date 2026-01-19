@@ -1,0 +1,38 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "[release] VSCode Extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/tatzeroko-vscode"
+			],
+			"outFiles": ["${workspaceFolder}/packages/tatzeroko-vscode/dist/**/*.js"],
+			"preLaunchTask": "Build all"
+		},
+		{
+			"name": "[debug] VSCode Extension + TS Plugin",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}/packages/tatzeroko-vscode",
+				"--user-data-dir=${workspaceFolder}/.vscode-debug"
+			],
+			"env": {
+				"TSS_DEBUG_BRK": "5859", // tells tsserver to wait for debugger
+				"NODE_ENV": "development"
+			},
+			"outFiles": ["${workspaceFolder}/packages/tatzeroko-vscode/dist/**/*.js"],
+			"preLaunchTask": "Build all"
+		},
+		{
+			"name": "[attach] TS Server (5859)",
+			"type": "node",
+			"request": "attach",
+			"port": 5859,
+			"restart": true,
+			"timeout": 30000
+		}
+	]
+}

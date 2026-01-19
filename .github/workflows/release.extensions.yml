@@ -1,0 +1,55 @@
+name: Release extensions
+
+on:
+  push:
+    tags:
+      - 'extension-*'
+
+jobs:
+  deploy:
+    if: github.repository == 'tatzeroko/language-tools'
+    name: Release Extensions
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+    
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build all packages
+        run: pnpm run build
+
+      - name: Prepare VS CODE extension version
+        working-directory: ./packages/tatzeroko-vscode
+        run: |
+          npm install -g json
+          VERSION="${GITHUB_REF#refs/tags/extension-}"
+          json -I -f package.json -e "this.version='$VERSION'"
+
+      - name: Prepare isolated install
+        working-directory: ./packages/tatzeroko-vscode
+        run: |
+          rm -rf node_modules
+          rm ../../pnpm-workspace.yaml ../../pnpm-lock.yaml ../../package.json
+          npm pkg set dependencies.@tatzeroko/language-server="*"
+          npm pkg set dependencies.@tatzeroko/typescript-plugin="*"
+          npm install
+
+      - name: Publish to VS CODE Marketplace
+        working-directory: ./packages/tatzeroko-vscode
+        env:
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        run: |
+          npx vsce publish -p "$VSCE_TOKEN"

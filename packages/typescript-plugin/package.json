@@ -1,0 +1,34 @@
+{
+	"name": "@tatzeroko/typescript-plugin",
+	"description": "Extends TypeScript with Salesforce-specific types and enhanced inference.",
+	"version": "0.1.0",
+	"author": "Tatzeroko Contributors",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/tatzeroko/language-tools.git"
+	},
+	"bugs": {
+		"url": "https://github.com/tatzeroko/language-tools/issues"
+	},
+	"homepage": "https://github.com/tatzeroko/language-tools#readme",
+	"packageManager": "pnpm@10.28.0",
+	"main": "dist/src/index.js",
+	"types": "dist/src/index.d.ts",
+	"files": [
+		"dist"
+	],
+	"exports": {
+		".": {
+			"default": "./dist/src/index.js",
+			"types": "./dist/src/index.d.ts"
+		}
+	},
+	"scripts": {
+		"build": "tsc"
+	},
+	"devDependencies": {
+		"@types/node": "^25.0.3",
+		"typescript": "^5.9.3"
+	}
+}

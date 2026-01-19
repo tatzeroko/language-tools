@@ -1,0 +1,50 @@
+{
+	"private": true,
+	"author": "Tatzeroko Contributors",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/tatzeroko/language-tools.git"
+	},
+	"bugs": {
+		"url": "https://github.com/tatzeroko/language-tools/issues"
+	},
+	"homepage": "https://github.com/tatzeroko/language-tools#readme",
+	"packageManager": "pnpm@10.28.0",
+	"workspaces": [
+		"packages/*"
+	],
+	"scripts": {
+		"build": "pnpm -r build",
+		"lint": "biome check .",
+		"lint:fix": "biome check . --write",
+		"format": "biome format . --write",
+		"format:check": "biome format . --check",
+		"commit": "cz",
+		"changeset:version": "changeset version && git add --all",
+		"changeset:publish": "changeset publish",
+		"prepare": "husky"
+	},
+	"lint-staged": {
+		"**/*.{js,ts}": [
+			"biome check --write"
+		]
+	},
+	"config": {
+		"commitizen": {
+			"path": "./node_modules/cz-conventional-changelog"
+		}
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.9",
+		"@changesets/cli": "^2.29.8",
+		"@commitlint/cli": "^20.2.0",
+		"@commitlint/config-conventional": "^20.2.0",
+		"@types/node": "^25.0.2",
+		"commitizen": "^4.3.1",
+		"cz-conventional-changelog": "^3.3.0",
+		"husky": "^9.1.7",
+		"lint-staged": "^16.2.7",
+		"typescript": "^5.9.3"
+	}
+}
