@@ -3,6 +3,7 @@
 	"displayName": "Tatzeroko Language Tools",
 	"description": "Brings enhanced tooling and Salesforce-specific language features directly into your editor.",
 	"version": "0.0.0",
+	"private": true,
 	"author": "Tatzeroko Contributors",
 	"publisher": "tatzeroko",
 	"license": "Apache-2.0",
