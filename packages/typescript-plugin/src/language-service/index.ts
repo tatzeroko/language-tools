@@ -133,7 +133,7 @@ function decorateLanguageServiceHost(
 
 			const componentName = moduleName.substring(2);
 
-			const contexts = ProjectContext.getAllInWorkspace(typescript, workspace);
+			const contexts = ProjectContext.getAllInWorkspace(workspace);
 
 			for (const ctx of contexts) {
 				const componentFolder = path.join(
