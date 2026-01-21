@@ -12,13 +12,14 @@ function init(modules: { typescript: typeof ts }) {
 	const sessionWithHandlers = new WeakSet<ts.server.Session>();
 
 	function create(info: ts.server.PluginCreateInfo) {
-		const workspace = findSalesforceWorkspaceRoot(
+		const rawWorkspace = findSalesforceWorkspaceRoot(
 			typescript,
 			info.project.getCurrentDirectory(),
 		);
-		if (!workspace) {
+		if (!rawWorkspace) {
 			return info.languageService;
 		}
+		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
 
 		/**
 		 * If both `jsconfig.json` and `tsconfig.json` exist in the same project directory,
@@ -37,10 +38,17 @@ function init(modules: { typescript: typeof ts }) {
 
 		setupSessionHandlers(info.session);
 
+		const existingContext = ProjectContext.get(
+			workspace,
+			info.project.getProjectName(),
+		);
+		if (existingContext) {
+			return info.languageService;
+		}
+
 		const vfs = new VirtualFileStore();
 		const context = new ProjectContext(
 			workspace,
-			typescript,
 			info.project,
 			info.languageServiceHost,
 			vfs,
@@ -73,19 +81,16 @@ function init(modules: { typescript: typeof ts }) {
 	}
 
 	function getExternalFiles(project: ts.server.Project) {
-		const workspace = findSalesforceWorkspaceRoot(
+		const rawWorkspace = findSalesforceWorkspaceRoot(
 			typescript,
 			project.getCurrentDirectory(),
 		);
-		if (!workspace) {
+		if (!rawWorkspace) {
 			return [];
 		}
 
-		const context = ProjectContext.get(
-			typescript,
-			workspace,
-			project.getProjectName(),
-		);
+		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
+		const context = ProjectContext.get(workspace, project.getProjectName());
 		return context?.vfs.list() ?? [];
 	}
 
