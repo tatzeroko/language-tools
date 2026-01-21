@@ -38,10 +38,7 @@ function init(modules: { typescript: typeof ts }) {
 
 		setupSessionHandlers(info.session);
 
-		const existingContext = ProjectContext.get(
-			workspace,
-			info.project.getProjectName(),
-		);
+		const existingContext = ProjectContext.get(workspace, info.project);
 		if (existingContext) {
 			return info.languageService;
 		}
@@ -90,7 +87,7 @@ function init(modules: { typescript: typeof ts }) {
 		}
 
 		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
-		const context = ProjectContext.get(workspace, project.getProjectName());
+		const context = ProjectContext.get(workspace, project);
 		return context?.vfs.list() ?? [];
 	}
 
