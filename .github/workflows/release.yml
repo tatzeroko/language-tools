@@ -42,6 +42,7 @@ jobs:
         with:
           version: pnpm changeset:version
           publish: pnpm changeset:publish
-          commit: false
+          commit: "chore(release): version packages"
+          title: "chore(release): version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
