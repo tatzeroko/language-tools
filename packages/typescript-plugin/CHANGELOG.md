@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+### Patch Changes
+
+- 4a148fa: Fix publishing to include compiled output
+
 ## 0.1.1
 
 ### Patch Changes
