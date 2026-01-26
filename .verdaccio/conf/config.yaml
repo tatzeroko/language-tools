@@ -5,10 +5,10 @@ uplinks:
     url: https://registry.npmjs.org/
 
 packages:
-  '@*/*':
+  '@tatzeroko/*':
     access: $all
     publish: $all
-    proxy: npmjs
+    proxy: false
 
   '**':
     access: $all
@@ -16,4 +16,4 @@ packages:
     proxy: npmjs
 
 logs:
-  - {type: stdout, format: pretty, level: http}
+  - { type: stdout, format: pretty, level: http }
