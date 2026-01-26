@@ -1,4 +1,4 @@
-name: Build VS Code Extension (VSIX)
+name: VS Code Extension - Bleeding Edge VSIX
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-        NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
+      NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/.npmrc
 
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,9 @@ jobs:
             sleep 2
           done
 
+      - name: Reset local registry
+        run: rm -rf .verdaccio/storage/*
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -45,10 +48,10 @@ jobs:
             npm set registry http://localhost:4873
             echo "//localhost:4873/:_authToken=fake-token" >> ${{ github.workspace }}/.npmrc
 
-      - name: Publish language server to local registry
+      - name: Publish language server (local)
         working-directory: ./packages/language-server
         run: npm publish
-      - name: Publish typescript plugin to local registry
+      - name: Publish typescript plugin (local)
         working-directory: ./packages/typescript-plugin
         run: npm publish
 
