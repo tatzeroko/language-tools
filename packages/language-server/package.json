@@ -1,7 +1,7 @@
 {
 	"name": "@tatzeroko/language-server",
 	"description": "Custom Language Server powering advanced code intelligence, navigation, and real-time feedback for Salesforce projects.",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"author": "Tatzeroko Contributors",
 	"license": "Apache-2.0",
 	"repository": {

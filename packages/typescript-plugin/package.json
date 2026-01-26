@@ -1,7 +1,7 @@
 {
 	"name": "@tatzeroko/typescript-plugin",
 	"description": "Extends TypeScript with Salesforce-specific types and enhanced inference.",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"author": "Tatzeroko Contributors",
 	"license": "Apache-2.0",
 	"repository": {
