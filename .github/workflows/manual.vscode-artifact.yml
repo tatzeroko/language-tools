@@ -47,10 +47,10 @@ jobs:
 
       - name: Publish language server to local registry
         working-directory: ./packages/language-server
-        run: npm publish
+        run: npm publish --force
       - name: Publish typescript plugin to local registry
         working-directory: ./packages/typescript-plugin
-        run: npm publish
+        run: npm publish --force
 
       - name: Prepare VS Code extension package
         working-directory: ./packages/tatzeroko-vscode
