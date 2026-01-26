@@ -4,9 +4,12 @@ on:
   push:
     tags:
       - 'extension-*'
+      
+permissions: {}
 
 jobs:
   deploy:
+    # Safety guard: only release from the canonical repository.
     if: github.repository == 'tatzeroko/language-tools'
     name: Release Extensions
     runs-on: ubuntu-latest
@@ -16,36 +19,70 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-    
+
+      # ------------------------------------------------------------
+      # Node + pnpm setup
+      # ------------------------------------------------------------
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
-      
+
+      # ------------------------------------------------------------
+      # Install dependencies and build packages
+      # ------------------------------------------------------------
       - name: Install dependencies (pnpm)
         run: pnpm install --frozen-lockfile
       - name: Build all packages
         run: pnpm build
 
-      - name: Prepare VS CODE extension version
+      # ------------------------------------------------------------
+      # Set VS Code extension version
+      #
+      # The extension version is derived from the git tag:
+      # extension-1.2.3  -> version: 1.2.3
+      #
+      # This keeps marketplace versions aligned with git tags
+      # without relying on package.json values.
+      # ------------------------------------------------------------
+      - name: Prepare VS Code extension version
         working-directory: ./packages/tatzeroko-vscode
         run: |
           npm install -g json
           VERSION="${GITHUB_REF#refs/tags/extension-}"
           json -I -f package.json -e "this.version='$VERSION'"
 
+      # ------------------------------------------------------------
+      # Prepare isolated extension install
+      #
+      # Workspace files are intentionally removed so that npm
+      # resolves dependencies exactly as end users would.
+      #
+      # This prevents pnpm workspace linking from hiding:
+      # - missing files
+      # - incorrect exports
+      # - runtime dependency issues
+      # ------------------------------------------------------------
       - name: Prepare isolated install
         working-directory: ./packages/tatzeroko-vscode
         run: |
           rm -rf node_modules
           rm ../../pnpm-workspace.yaml ../../pnpm-lock.yaml ../../package.json
+
           npm pkg set dependencies.@tatzeroko/language-server="*"
           npm pkg set dependencies.@tatzeroko/typescript-plugin="*"
+
           npm install
 
-      - name: Publish to VS CODE Marketplace
+      # ------------------------------------------------------------
+      # Publish extension to VS Code Marketplace
+      #
+      # This publishes the extension version defined above using
+      # the official vsce CLI and marketplace token.
+      # ------------------------------------------------------------
+      - name: Publish to VS Code Marketplace
         working-directory: ./packages/tatzeroko-vscode
         env:
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
