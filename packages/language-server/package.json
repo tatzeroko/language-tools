@@ -38,7 +38,8 @@
 		"node": ">=18"
 	},
 	"scripts": {
-		"build": "tsc"
+		"build": "tsc",
+		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
 		"vscode-languageserver": "^9.0.1",
