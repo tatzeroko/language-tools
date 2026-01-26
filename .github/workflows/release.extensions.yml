@@ -24,10 +24,10 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       
-      - name: Install dependencies
+      - name: Install dependencies (pnpm)
         run: pnpm install --frozen-lockfile
       - name: Build all packages
-        run: pnpm run build
+        run: pnpm build
 
       - name: Prepare VS CODE extension version
         working-directory: ./packages/tatzeroko-vscode
