@@ -1,3 +1,4 @@
+import path from "node:path";
 import type * as ts from "typescript/lib/tsserverlibrary";
 import { decorateLanguageService } from "./language-service";
 import { findSalesforceWorkspaceRoot } from "./lib/salesforce";
@@ -5,11 +6,35 @@ import { hasEquivalentProjectCounterpart } from "./lib/ts";
 import ProjectContext from "./projectContext";
 import { VirtualFileStore } from "./vfs";
 
+type ApexPayloadFile = {
+	readonly path: string;
+	readonly content: string;
+	readonly moduleName: string;
+};
+
+type ApexUpdateRequest = {
+	readonly workspace?: string;
+	readonly files?: ReadonlyArray<ApexPayloadFile>;
+};
+
+function getRequestPayload<T>(
+	request: ts.server.protocol.Request,
+): T | undefined {
+	const candidate = Array.isArray(request.arguments)
+		? request.arguments[0]
+		: request.arguments;
+	return candidate as T | undefined;
+}
+
 function init(modules: { typescript: typeof ts }) {
 	const { typescript } = modules;
 
 	/** Tracks sessions that have had handlers added */
 	const sessionWithHandlers = new WeakSet<ts.server.Session>();
+	const workspaceApexDefinitions = new Map<
+		string,
+		ReadonlyArray<ApexPayloadFile>
+	>();
 
 	function create(info: ts.server.PluginCreateInfo) {
 		const rawWorkspace = findSalesforceWorkspaceRoot(
@@ -36,10 +61,11 @@ function init(modules: { typescript: typeof ts }) {
 			return info.languageService;
 		}
 
-		setupSessionHandlers(info.session);
+		setupSessionHandlers(info.session, info.project.projectService.logger);
 
 		const existingContext = ProjectContext.get(workspace, info.project);
 		if (existingContext) {
+			applyWorkspaceApexFiles(workspace);
 			return info.languageService;
 		}
 
@@ -50,6 +76,7 @@ function init(modules: { typescript: typeof ts }) {
 			info.languageServiceHost,
 			vfs,
 		);
+		applyWorkspaceApexFiles(workspace);
 
 		return decorateLanguageService(
 			workspace,
@@ -58,40 +85,100 @@ function init(modules: { typescript: typeof ts }) {
 			info.languageService,
 			vfs,
 			() => context.dispose(),
+			(moduleName) => resolveApexModulePath(workspace, moduleName),
 		);
 	}
 
 	/**
 	 * @param session The TypeScript server session instance.
 	 */
-	function setupSessionHandlers(session: ts.server.Session | undefined) {
+	function setupSessionHandlers(
+		session: ts.server.Session | undefined,
+		logger: ts.server.Logger,
+	) {
 		if (!session || sessionWithHandlers.has(session)) return;
 		sessionWithHandlers.add(session);
 
-		// note: Placeholder for future session protocol handlers
-		/*session.addProtocolHandler("<specifier>", (request) => {
-			return {
-				response: { message: "<message>" },
-				responseRequired: true,
-			};
-		});*/
+		const registerHandler = (
+			command: string,
+			handler: (
+				request: ts.server.protocol.Request,
+			) => ts.server.HandlerResponse,
+		) => {
+			try {
+				session.addProtocolHandler(command, handler);
+			} catch (error) {
+				logger.info(
+					`tatzeroko: typescript-plugin skip duplicate ${command} handler ${error}`,
+				);
+			}
+		};
+
+		registerHandler("_tatzeroko/updateApexTypes", (request) => {
+			const payload = getRequestPayload<ApexUpdateRequest>(request);
+			if (!payload?.workspace || !Array.isArray(payload.files)) {
+				return { response: { success: false } };
+			}
+
+			const normalizedWorkspace = typescript.server.toNormalizedPath(
+				payload.workspace,
+			);
+			const files = payload.files.filter(
+				(file): file is ApexPayloadFile =>
+					!!file &&
+					typeof file.path === "string" &&
+					typeof file.content === "string" &&
+					typeof file.moduleName === "string",
+			);
+			workspaceApexDefinitions.set(normalizedWorkspace, files);
+			applyWorkspaceApexFiles(normalizedWorkspace);
+			return { response: { success: true }, responseRequired: true };
+		});
 	}
 
-	function getExternalFiles(project: ts.server.Project) {
-		const rawWorkspace = findSalesforceWorkspaceRoot(
-			typescript,
-			project.getCurrentDirectory(),
-		);
-		if (!rawWorkspace) {
-			return [];
+	function applyWorkspaceApexFiles(workspace: string) {
+		const definitions = workspaceApexDefinitions.get(workspace) ?? [];
+		for (const ctx of getContextsForWorkspace(workspace)) {
+			for (const definition of definitions) {
+				ctx.vfs.set(definition.path, definition.content);
+			}
 		}
-
-		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
-		const context = ProjectContext.get(workspace, project);
-		return context?.vfs.list() ?? [];
 	}
 
-	return { create, getExternalFiles };
+	function getContextsForWorkspace(workspace: string) {
+		const contexts: ProjectContext[] = [];
+		for (const [ctxWorkspace, map] of ProjectContext.getAllWorkspaces()) {
+			if (isWorkspaceMatch(workspace, ctxWorkspace)) {
+				contexts.push(...map.values());
+			}
+		}
+		return contexts;
+	}
+
+	function isWorkspaceMatch(workspace: string, ctxWorkspace: string) {
+		return (
+			workspace === ctxWorkspace ||
+			workspace.startsWith(`${ctxWorkspace}/`) ||
+			ctxWorkspace.startsWith(`${workspace}/`)
+		);
+	}
+
+	function resolveApexModulePath(workspace: string, moduleName: string) {
+		if (!moduleName.startsWith("@salesforce/apex/")) {
+			return undefined;
+		}
+		return typescript.server.toNormalizedPath(
+			path.join(
+				workspace,
+				".tatzeroko",
+				"virtual",
+				"apex",
+				`${moduleName.slice("@salesforce/apex/".length)}.d.ts`,
+			),
+		);
+	}
+
+	return { create, getExternalFiles: () => [] };
 }
 
 export = init;

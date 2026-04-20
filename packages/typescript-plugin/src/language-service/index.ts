@@ -3,17 +3,8 @@ import type * as ts from "typescript/lib/tsserverlibrary";
 import ProjectContext from "../projectContext";
 import type { VirtualFileStore } from "../vfs";
 
-/**
- * Decorates the TypeScript Language Service and its Host with additional functionality
- * specific to Salesforce TypeScript projects.
- *
- * @param workspace The workspace directory path.
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param host The TypeScript Language Service Host instance to decorate.
- * @param ls The TypeScript Language Service instance to decorate.
- * @param vfs The Virtual File Store instance for managing virtual files.
- * @param dispose A callback function to execute when the Language Service is disposed.
- */
+type ApexModuleResolver = (moduleName: string) => string | undefined;
+
 export function decorateLanguageService(
 	workspace: string,
 	typescript: typeof ts,
@@ -21,27 +12,25 @@ export function decorateLanguageService(
 	ls: ts.LanguageService,
 	vfs: VirtualFileStore,
 	dispose: () => void,
+	resolveApexModule?: ApexModuleResolver,
 ) {
-	decorateLanguageServiceHost(workspace, typescript, host, vfs);
+	decorateLanguageServiceHost(
+		workspace,
+		typescript,
+		host,
+		vfs,
+		resolveApexModule,
+	);
 	decorateLanguageServiceInner(ls, dispose);
-
 	return ls;
 }
 
-/**
- * Decorates the TypeScript Language Service Host to include virtual files
- * managed by the provided Application.
- *
- * @param workspace The workspace directory path.
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param host The TypeScript Language Service Host instance to decorate.
- * @param vfs The Virtual File Store instance for managing virtual files.
- */
 function decorateLanguageServiceHost(
 	workspace: string,
 	typescript: typeof ts,
 	host: ts.LanguageServiceHost,
 	vfs: VirtualFileStore,
+	resolveApexModule?: ApexModuleResolver,
 ) {
 	const orig = {
 		getScriptFileNames: host.getScriptFileNames?.bind(host),
@@ -52,14 +41,26 @@ function decorateLanguageServiceHost(
 		resolveModuleNameLiterals: host.resolveModuleNameLiterals?.bind(host),
 	};
 
-	host.getScriptFileNames = () => {
-		const fileNames = orig.getScriptFileNames?.() ?? [];
-
-		return [
-			...fileNames,
-			...Array.from(vfs.list()).filter((vf) => !fileNames.includes(vf)),
-		];
+	const resolveApexModulePath = (moduleName: string) => {
+		if (!resolveApexModule) {
+			return undefined;
+		}
+		return resolveApexModule(moduleName);
 	};
+
+	const createApexResolvedModule = (moduleName: string) => {
+		const resolvedFileName = resolveApexModulePath(moduleName);
+		if (!resolvedFileName) {
+			return undefined;
+		}
+		return {
+			extension: typescript.Extension.Dts,
+			isExternalLibraryImport: true,
+			resolvedFileName,
+		};
+	};
+
+	host.getScriptFileNames = () => orig.getScriptFileNames?.() ?? [];
 
 	host.getScriptSnapshot = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
@@ -111,39 +112,27 @@ function decorateLanguageServiceHost(
 				reusedNames,
 			) ?? [];
 
-		return resolutions.map((resolution, index) => {
-			const moduleLiteral = moduleLiterals[index];
+		return moduleLiterals.map((moduleLiteral, index) => {
 			const moduleName = moduleLiteral.text;
+			const resolution = resolutions[index];
 
-			/**
-			 * TODO: Namespace support
-			 *
-			 * Component paths are currently resolved assuming the default namespace (`c/`).
-			 *
-			 * Proper namespace handling requires:
-			 * - A workspace-level namespace registry
-			 * - A source of truth for namespace resolution (e.g. org metadata / config)
-			 * - Overridable resolution logic shared across projects
-			 *
-			 * This is intentionally deferred until a namespace abstraction exists.
-			 */
+			if (moduleName.startsWith("@salesforce/apex/")) {
+				const resolvedModule = createApexResolvedModule(moduleName);
+				if (resolvedModule) {
+					return { resolvedModule };
+				}
+			}
+
 			if (!moduleName.startsWith("c/")) {
 				return resolution;
 			}
 
 			const componentName = moduleName.substring(2);
-
-			const contexts = ProjectContext.getAllInWorkspace(workspace);
-
-			for (const ctx of contexts) {
+			for (const ctx of ProjectContext.getAllInWorkspace(workspace)) {
 				const componentFolder = path.join(
 					ctx.project.getCurrentDirectory(),
 					componentName,
 				);
-
-				/**
-				 * Prioritized in order specified
-				 */
 				const extensions = {
 					".d.ts": typescript.Extension.Dts,
 					".ts": typescript.Extension.Ts,
@@ -156,9 +145,6 @@ function decorateLanguageServiceHost(
 						`${componentName}${ext}`,
 					);
 					if (ctx.host.fileExists?.(candidate)) {
-						/**
-						 * Prioritizes first found match across all projects in workspace
-						 */
 						return {
 							resolvedModule: {
 								extension,
@@ -174,20 +160,11 @@ function decorateLanguageServiceHost(
 	};
 }
 
-/**
- * Decorates the TypeScript Language Service with additional functionality.
- *
- * @param ls The TypeScript Language Service instance to decorate.
- * @param dispose A callback function to execute when the Language Service is disposed.
- */
 function decorateLanguageServiceInner(
 	ls: ts.LanguageService,
 	dispose: () => void,
 ) {
-	const orig = {
-		dispose: ls.dispose?.bind(ls),
-	};
-
+	const orig = { dispose: ls.dispose?.bind(ls) };
 	ls.dispose = () => {
 		dispose();
 		orig.dispose?.();
