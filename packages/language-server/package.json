@@ -42,6 +42,8 @@
 		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
+		"tree-sitter": "^0.22.4",
+		"tree-sitter-sfapex": "^2.4.1",
 		"vscode-languageserver": "^9.0.1",
 		"vscode-languageserver-textdocument": "^1.0.12"
 	},
