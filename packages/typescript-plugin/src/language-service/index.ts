@@ -38,6 +38,8 @@ function decorateLanguageServiceHost(
 		getScriptVersion: host.getScriptVersion?.bind(host),
 		readFile: host.readFile?.bind(host),
 		fileExists: host.fileExists?.bind(host),
+		readDirectory: host.readDirectory?.bind(host),
+		directoryExists: host.directoryExists?.bind(host),
 		resolveModuleNames: host.resolveModuleNames?.bind(host),
 		resolveModuleNameLiterals: host.resolveModuleNameLiterals?.bind(host),
 	};
@@ -96,6 +98,45 @@ function decorateLanguageServiceHost(
 	host.fileExists = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
 		return vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
+	};
+
+	host.directoryExists = (directoryName: string) => {
+		const normalized = typescript.server.toNormalizedPath(directoryName);
+		if (
+			Array.from(vfs.list()).some((file) => file.startsWith(`${normalized}/`))
+		) {
+			return true;
+		}
+		return orig.directoryExists?.(directoryName) ?? false;
+	};
+
+	host.readDirectory = (
+		directoryName: string,
+		extensions?: readonly string[],
+		exclude?: readonly string[],
+		include?: readonly string[],
+		depth?: number,
+	) => {
+		const base =
+			orig.readDirectory?.(
+				directoryName,
+				extensions,
+				exclude,
+				include,
+				depth,
+			) ?? [];
+		const normalizedDir = typescript.server.toNormalizedPath(directoryName);
+		const suffixes = new Set(extensions ?? []);
+		const virtualFiles = vfs
+			.list()
+			.filter((file) => file.startsWith(`${normalizedDir}/`))
+			.filter((file) => {
+				if (!suffixes.size) {
+					return true;
+				}
+				return Array.from(suffixes).some((ext) => file.endsWith(ext));
+			});
+		return Array.from(new Set([...base, ...virtualFiles]));
 	};
 
 	host.resolveModuleNameLiterals = (
