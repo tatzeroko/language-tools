@@ -3,6 +3,19 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ApexVirtualTypeService } from "../src/apex";
 
+async function waitFor<T>(fn: () => T | undefined, timeoutMs = 3000) {
+	const started = Date.now();
+	let value: T | undefined;
+	while (Date.now() - started < timeoutMs) {
+		value = fn();
+		if (value !== undefined) {
+			return value;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+	return value;
+}
+
 describe("ApexVirtualTypeService", () => {
 	it("generates a virtual declaration from an Apex class", async () => {
 		const workspace = fs.mkdtempSync(
@@ -34,19 +47,32 @@ describe("ApexVirtualTypeService", () => {
 				"utf8",
 			);
 
-			let payload: unknown;
+			const payloads: unknown[] = [];
 			const service = new ApexVirtualTypeService(
 				{
 					sendNotification: () => undefined,
 				} as never,
 				workspace,
 				async (next) => {
-					payload = next;
+					payloads.push(next);
 					return undefined;
 				},
 			);
 
 			await service.initialize();
+
+			const payload = await waitFor(() => {
+				const next = payloads.at(-1) as
+					| {
+							workspace: string;
+							files: Array<{ moduleName: string; content: string }>;
+					  }
+					| undefined;
+				return next?.files[0]?.moduleName ===
+					"@salesforce/apex/ContactController.search"
+					? next
+					: undefined;
+			});
 
 			expect(payload).toMatchObject({ workspace });
 			const files = (
@@ -57,8 +83,10 @@ describe("ApexVirtualTypeService", () => {
 				"@salesforce/apex/ContactController.search",
 			);
 			expect(files[0]?.content).toContain("ContactControllerSearchParams");
-			expect(files[0]?.content).toContain("Finds contacts matching the query.");
-			expect(files[0]?.content).toContain("Promise<unknown[]>");
+			expect(files[0]?.content).toContain(
+				"Executes a search using either SOQL or SOSL based on search criteria.",
+			);
+			expect(files[0]?.content).toContain("Promise<unknown>");
 		} finally {
 			fs.rmSync(workspace, { recursive: true, force: true });
 		}

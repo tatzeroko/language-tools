@@ -3,6 +3,7 @@ import type * as ts from "typescript/lib/tsserverlibrary";
 import { decorateLanguageService } from "./language-service";
 import { findSalesforceWorkspaceRoot } from "./lib/salesforce";
 import { hasEquivalentProjectCounterpart } from "./lib/ts";
+import { loadFile, unloadFile } from "./lib/ts/file";
 import ProjectContext from "./projectContext";
 import { VirtualFileStore } from "./vfs";
 
@@ -139,8 +140,25 @@ function init(modules: { typescript: typeof ts }) {
 	function applyWorkspaceApexFiles(workspace: string) {
 		const definitions = workspaceApexDefinitions.get(workspace) ?? [];
 		for (const ctx of getContextsForWorkspace(workspace)) {
+			const nextPaths = new Set(
+				definitions.map((definition) => definition.path),
+			);
+			for (const existingPath of ctx.vfs.list()) {
+				if (!nextPaths.has(existingPath)) {
+					unloadFile(typescript, ctx.project, existingPath);
+					ctx.vfs.delete(existingPath);
+				}
+			}
 			for (const definition of definitions) {
 				ctx.vfs.set(definition.path, definition.content);
+				if (
+					ctx.project.containsFile(
+						typescript.server.toNormalizedPath(definition.path),
+					)
+				) {
+					unloadFile(typescript, ctx.project, definition.path);
+				}
+				loadFile(typescript, ctx.project, definition.path, definition.content);
 			}
 		}
 	}
@@ -170,15 +188,37 @@ function init(modules: { typescript: typeof ts }) {
 		return typescript.server.toNormalizedPath(
 			path.join(
 				workspace,
-				".tatzeroko",
-				"virtual",
+				"node_modules",
+				"@salesforce",
 				"apex",
 				`${moduleName.slice("@salesforce/apex/".length)}.d.ts`,
 			),
 		);
 	}
 
-	return { create, getExternalFiles: () => [] };
+	return {
+		create,
+		getExternalFiles: (project: ts.server.Project) => {
+			const rawWorkspace = findSalesforceWorkspaceRoot(
+				typescript,
+				project.getCurrentDirectory(),
+			);
+			if (!rawWorkspace) {
+				return [];
+			}
+			const workspace = typescript.server.toNormalizedPath(rawWorkspace);
+			const files: string[] = [];
+			for (const [ctxWorkspace, definitions] of workspaceApexDefinitions) {
+				if (!isWorkspaceMatch(workspace, ctxWorkspace)) {
+					continue;
+				}
+				for (const definition of definitions) {
+					files.push(typescript.server.toNormalizedPath(definition.path));
+				}
+			}
+			return files;
+		},
+	};
 }
 
 export = init;

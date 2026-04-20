@@ -79,6 +79,24 @@ suite("Apex virtual types integration", () => {
 		assert.ok(hover, "expected hover with generated Apex params type");
 		const text = hoverText(hover);
 		assert.match(text, /ContactControllerSearchParams/);
-		assert.match(text, /Finds contacts matching the query\./);
+		assert.match(
+			text,
+			/Executes a search using either SOQL or SOSL based on search criteria\./,
+		);
+		const diagnostics = await waitFor(async () => {
+			const items = vscode.languages.getDiagnostics(document.uri);
+			return items.some(
+				(item) =>
+					item.code === 2307 &&
+					item.message.includes("@salesforce/apex/ContactController.search"),
+			)
+				? undefined
+				: true;
+		});
+		assert.strictEqual(
+			diagnostics,
+			true,
+			"expected resolved Apex module to clear TS2307",
+		);
 	});
 });

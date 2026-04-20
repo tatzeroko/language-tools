@@ -33,7 +33,7 @@ function resolveServerModule(context: vscode.ExtensionContext) {
 	throw new Error("Could not resolve language server module");
 }
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 	const serverModule = resolveServerModule(context);
 	const serverOptions: ServerOptions = {
 		run: {
@@ -61,19 +61,43 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	client.onNotification("tsserver/request", ([seq, command, args]) => {
-		vscode.commands
-			.executeCommand<{ body?: unknown } | undefined>(
-				"typescript.tsserverRequest",
-				command,
-				args,
-				{ isAsync: true, lowPriority: true },
-			)
-			.then(
-				(res) =>
-					client?.sendNotification("tsserver/response", [seq, res?.body]),
-				() => client?.sendNotification("tsserver/response", [seq, undefined]),
-			);
+		const forward = async (attempt = 0): Promise<void> => {
+			try {
+				const res = (
+					await vscode.commands.executeCommand<{ body?: unknown } | undefined>(
+						"typescript.tsserverRequest",
+						command,
+						args,
+						{ isAsync: true, lowPriority: true },
+					)
+				)?.body;
+				if (
+					res === undefined &&
+					command === "_tatzeroko/updateApexTypes" &&
+					attempt < 4
+				) {
+					setTimeout(() => void forward(attempt + 1), 250 * (attempt + 1));
+				}
+				client?.sendNotification("tsserver/response", [seq, res]);
+				if (command === "_tatzeroko/updateApexTypes") {
+					setTimeout(() => {
+						void vscode.commands.executeCommand("typescript.reloadProjects");
+					}, 0);
+				}
+			} catch {
+				if (command === "_tatzeroko/updateApexTypes" && attempt < 4) {
+					setTimeout(() => void forward(attempt + 1), 250 * (attempt + 1));
+				}
+				client?.sendNotification("tsserver/response", [seq, undefined]);
+			}
+		};
+
+		void forward();
 	});
+
+	await vscode.extensions
+		.getExtension("vscode.typescript-language-features")
+		?.activate();
 
 	client.start();
 }

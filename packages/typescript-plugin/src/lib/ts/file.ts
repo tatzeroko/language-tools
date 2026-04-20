@@ -34,14 +34,20 @@ export function loadFile(
 		project.projectService.openFiles.set(scriptInfo.path, undefined);
 	}
 
-	// biome-ignore lint/suspicious/noExplicitAny: Need access to `projectRootPath`
-	if ((project as any).projectRootPath) {
-		/**
-		 * Only add the file to the project if it has a projectRootPath, because else
-		 * a ts.Assert error will be thrown when multiple inferred projects are tried
-		 * to be merged.
-		 */
-		project.addRoot(scriptInfo);
+	try {
+		project.projectService.openClientFileWithNormalizedPath(
+			normalizedPath,
+			content,
+			undefined,
+			false,
+			typescript.server.toNormalizedPath(project.getCurrentDirectory()),
+		);
+	} catch {
+		try {
+			project.addRoot(scriptInfo);
+		} catch {
+			/** ignore project root insertion issues for virtual files */
+		}
 	}
 
 	project.updateGraph();

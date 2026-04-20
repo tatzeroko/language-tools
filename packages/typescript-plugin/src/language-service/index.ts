@@ -38,6 +38,7 @@ function decorateLanguageServiceHost(
 		getScriptVersion: host.getScriptVersion?.bind(host),
 		readFile: host.readFile?.bind(host),
 		fileExists: host.fileExists?.bind(host),
+		resolveModuleNames: host.resolveModuleNames?.bind(host),
 		resolveModuleNameLiterals: host.resolveModuleNameLiterals?.bind(host),
 	};
 
@@ -60,7 +61,10 @@ function decorateLanguageServiceHost(
 		};
 	};
 
-	host.getScriptFileNames = () => orig.getScriptFileNames?.() ?? [];
+	host.getScriptFileNames = () => {
+		const scriptFileNames = orig.getScriptFileNames?.() ?? [];
+		return [...scriptFileNames, ...vfs.list()];
+	};
 
 	host.getScriptSnapshot = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
@@ -157,6 +161,42 @@ function decorateLanguageServiceHost(
 
 			return resolution;
 		});
+	};
+
+	host.resolveModuleNames = (
+		moduleNames,
+		containingFile,
+		_reusedNames,
+		_redirectedReference,
+		options,
+		containingSourceFile,
+	) => {
+		const literals = moduleNames.map(
+			(text) => ({ text }) as ts.StringLiteralLike,
+		);
+		const literalResolutions = containingSourceFile
+			? host.resolveModuleNameLiterals?.(
+					literals,
+					containingFile,
+					_redirectedReference,
+					options,
+					containingSourceFile,
+					undefined,
+				)
+			: undefined;
+		if (literalResolutions) {
+			return literalResolutions.map((resolution) => resolution?.resolvedModule);
+		}
+		return (
+			orig.resolveModuleNames?.(
+				moduleNames,
+				containingFile,
+				_reusedNames,
+				_redirectedReference,
+				options,
+				containingSourceFile,
+			) ?? moduleNames.map(() => undefined)
+		);
 	};
 }
 

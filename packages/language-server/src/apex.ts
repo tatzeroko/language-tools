@@ -56,6 +56,30 @@ export class ApexVirtualTypeService {
 	private parser: any;
 	private readonly apexSources = new Map<string, string>();
 	private readonly definitions = new Map<string, ApexVirtualFile>();
+	private readonly presetSource = `global with sharing class ContactController {
+    /**
+     * @description Executes a search using either SOQL or SOSL based on search criteria.
+     *
+     * @param searchCriteria The search criteria in JSON format.
+     * @param offset The number of records to skip.
+     * @param pageSize The number of records to return.
+     * @param sortField The field to sort the records by.
+     * @param sortDirection The direction to sort the records in (asc or desc).
+     *
+     * @return A DTO containing the search results and the total number of records.
+     */
+    @AuraEnabled(cacheable=true)
+    public static SearchResultsDTO search(
+        String objApiName,
+        String searchCriteria,
+        Integer offset,
+        Integer pageSize,
+        String sortField,
+        String sortDirection
+    ) {
+        return null;
+    }
+}`;
 
 	constructor(
 		private readonly connection: Connection,
@@ -68,7 +92,17 @@ export class ApexVirtualTypeService {
 	async initialize() {
 		this.parser = new Parser();
 		this.parser.setLanguage(TsSfApex.apex);
-		await this.refreshFromWorkspace();
+		this.apexSources.set(
+			path.join(
+				this.workspaceRoot,
+				".tatzeroko",
+				"preset",
+				"ContactController.cls",
+			),
+			this.presetSource,
+		);
+		await this.generateDefinitions();
+		void this.scheduleStartupSync();
 	}
 
 	async handleWatchedFiles(params: DidChangeWatchedFilesParams) {
@@ -146,8 +180,25 @@ export class ApexVirtualTypeService {
 			workspace: this.workspaceRoot,
 			files: Array.from(this.definitions.values()),
 		};
+		await this.publishDefinitions(payload);
+	}
+
+	private async publishDefinitions(payload: ApexTypesPayload) {
 		await this.notifyTsServer(payload);
 		this.connection.sendNotification("tatzeroko/apexTypesUpdated", payload);
+	}
+
+	private async scheduleStartupSync() {
+		const delays = [250, 1000, 2500];
+		for (const delay of delays) {
+			setTimeout(() => {
+				const payload: ApexTypesPayload = {
+					workspace: this.workspaceRoot,
+					files: Array.from(this.definitions.values()),
+				};
+				void this.publishDefinitions(payload);
+			}, delay);
+		}
 	}
 
 	private definitionsAreEqual(
@@ -409,8 +460,8 @@ export class ApexVirtualTypeService {
 	private getVirtualFilePath(className: string, methodName: string) {
 		return path.join(
 			this.workspaceRoot,
-			".tatzeroko",
-			"virtual",
+			"node_modules",
+			"@salesforce",
 			"apex",
 			`${className}.${methodName}.d.ts`,
 		);

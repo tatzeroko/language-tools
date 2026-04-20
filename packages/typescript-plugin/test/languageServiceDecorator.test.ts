@@ -12,8 +12,8 @@ describe("language-service decorator", () => {
 		try {
 			const virtualPath = path.join(
 				workspace,
-				".tatzeroko",
-				"virtual",
+				"node_modules",
+				"@salesforce",
 				"apex",
 				"ContactController.search.d.ts",
 			);
@@ -82,6 +82,10 @@ export default function search(params: ContactControllerSearchParams): Promise<u
 			expect(
 				quickInfo?.displayParts?.map((part) => part.text).join(" "),
 			).toContain("ContactControllerSearchParams");
+			const diagnostics = ls
+				.getSemanticDiagnostics(consumerPath)
+				.filter((diagnostic) => diagnostic.code === 2307);
+			expect(diagnostics).toHaveLength(0);
 			const moduleLiteral = {
 				text: "@salesforce/apex/ContactController.search",
 			} as ts.StringLiteralLike;
