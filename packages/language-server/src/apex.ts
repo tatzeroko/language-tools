@@ -7,11 +7,7 @@ import type {
 	DidChangeWatchedFilesParams,
 } from "vscode-languageserver/node";
 
-// Native Tree-sitter bindings loaded via CommonJS so pnpm can build them locally.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Parser = require("tree-sitter");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const TsSfApex = require("tree-sitter-sfapex");
+import { ApexWorkerClient } from "./apex-worker-client";
 
 export type ApexVirtualFile = {
 	readonly path: string;
@@ -56,6 +52,10 @@ export class ApexVirtualTypeService {
 	private parser: any;
 	private readonly apexSources = new Map<string, string>();
 	private readonly definitions = new Map<string, ApexVirtualFile>();
+	private workerClient?: ApexWorkerClient;
+	private generationTimer?: ReturnType<typeof setTimeout>;
+	private generationTicket = 0;
+	private workspaceRevision = 0;
 	private readonly presetSource = `global with sharing class ContactController {
     /**
      * @description Executes a search using either SOQL or SOSL based on search criteria.
@@ -90,8 +90,7 @@ export class ApexVirtualTypeService {
 	) {}
 
 	async initialize() {
-		this.parser = new Parser();
-		this.parser.setLanguage(TsSfApex.apex);
+		this.workerClient = new ApexWorkerClient(this.workspaceRoot);
 		this.apexSources.set(
 			path.join(
 				this.workspaceRoot,
@@ -101,8 +100,7 @@ export class ApexVirtualTypeService {
 			),
 			this.presetSource,
 		);
-		await this.generateDefinitions();
-		void this.scheduleStartupSync();
+		void this.refreshFromWorkspace();
 	}
 
 	async handleWatchedFiles(params: DidChangeWatchedFilesParams) {
@@ -116,8 +114,9 @@ export class ApexVirtualTypeService {
 		if (!filePath || !filePath.endsWith(".cls")) {
 			return;
 		}
+		this.workspaceRevision += 1;
 		this.apexSources.set(filePath, text);
-		void this.generateDefinitions();
+		void this.scheduleGeneration();
 	}
 
 	handleDocumentSaved(uri: string, text: string) {
@@ -125,11 +124,13 @@ export class ApexVirtualTypeService {
 		if (!filePath || !filePath.endsWith(".cls")) {
 			return;
 		}
+		this.workspaceRevision += 1;
 		this.apexSources.set(filePath, text);
-		void this.generateDefinitions();
+		void this.scheduleGeneration();
 	}
 
 	private async refreshFromWorkspace() {
+		const revision = this.workspaceRevision;
 		const apexFiles = await this.collectApexFiles(this.workspaceRoot);
 		const nextSources = new Map<string, string>();
 		for (const filePath of apexFiles) {
@@ -139,14 +140,58 @@ export class ApexVirtualTypeService {
 				/** ignore unreadable files */
 			}
 		}
+		if (revision !== this.workspaceRevision) {
+			return;
+		}
 		this.apexSources.clear();
 		for (const [filePath, content] of nextSources) {
 			this.apexSources.set(filePath, content);
 		}
-		await this.generateDefinitions();
+		await this.scheduleGeneration();
 	}
 
-	private async generateDefinitions() {
+	private async scheduleGeneration() {
+		const ticket = ++this.generationTicket;
+		if (this.generationTimer) {
+			clearTimeout(this.generationTimer);
+		}
+		this.generationTimer = setTimeout(() => {
+			void this.generateDefinitions(ticket);
+		}, 0);
+	}
+
+	private async generateDefinitions(ticket: number) {
+		const workerClient = this.workerClient;
+		if (!workerClient) {
+			return;
+		}
+		const sources = Array.from(this.apexSources.entries());
+		const nextDefinitions = new Map<string, ApexVirtualFile>();
+		for (const file of await workerClient.generate(sources)) {
+			nextDefinitions.set(file.path, file);
+		}
+
+		if (ticket !== this.generationTicket) {
+			return;
+		}
+
+		if (this.definitionsAreEqual(this.definitions, nextDefinitions)) {
+			return;
+		}
+
+		this.definitions.clear();
+		for (const [filePath, definition] of nextDefinitions) {
+			this.definitions.set(filePath, definition);
+		}
+
+		const payload: ApexTypesPayload = {
+			workspace: this.workspaceRoot,
+			files: Array.from(this.definitions.values()),
+		};
+		await this.publishDefinitions(payload);
+	}
+
+	private async generateDefinitionsLegacy() {
 		const nextDefinitions = new Map<string, ApexVirtualFile>();
 
 		for (const [filePath, content] of this.apexSources) {
@@ -186,19 +231,6 @@ export class ApexVirtualTypeService {
 	private async publishDefinitions(payload: ApexTypesPayload) {
 		await this.notifyTsServer(payload);
 		this.connection.sendNotification("tatzeroko/apexTypesUpdated", payload);
-	}
-
-	private async scheduleStartupSync() {
-		const delays = [250, 1000, 2500];
-		for (const delay of delays) {
-			setTimeout(() => {
-				const payload: ApexTypesPayload = {
-					workspace: this.workspaceRoot,
-					files: Array.from(this.definitions.values()),
-				};
-				void this.publishDefinitions(payload);
-			}, delay);
-		}
 	}
 
 	private definitionsAreEqual(

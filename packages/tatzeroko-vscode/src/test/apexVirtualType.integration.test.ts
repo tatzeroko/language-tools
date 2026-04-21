@@ -79,10 +79,7 @@ suite("Apex virtual types integration", () => {
 		assert.ok(hover, "expected hover with generated Apex params type");
 		const text = hoverText(hover);
 		assert.match(text, /ContactControllerSearchParams/);
-		assert.match(
-			text,
-			/Executes a search using either SOQL or SOSL based on search criteria\./,
-		);
+		assert.match(text, /Finds contacts matching the query\./);
 		const diagnostics = await waitFor(async () => {
 			const items = vscode.languages.getDiagnostics(document.uri);
 			return items.some(
