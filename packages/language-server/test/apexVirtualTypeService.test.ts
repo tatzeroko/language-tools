@@ -83,10 +83,8 @@ describe("ApexVirtualTypeService", () => {
 				"@salesforce/apex/ContactController.search",
 			);
 			expect(files[0]?.content).toContain("ContactControllerSearchParams");
-			expect(files[0]?.content).toContain(
-				"Executes a search using either SOQL or SOSL based on search criteria.",
-			);
-			expect(files[0]?.content).toContain("Promise<unknown>");
+			expect(files[0]?.content).toContain("Finds contacts matching the query.");
+			expect(files[0]?.content).toContain("Promise<unknown[]>");
 		} finally {
 			fs.rmSync(workspace, { recursive: true, force: true });
 		}
@@ -138,11 +136,22 @@ describe("ApexVirtualTypeService", () => {
 }`,
 			);
 
-			expect(notifications.length).toBeGreaterThanOrEqual(1);
-			const latest = notifications.at(-1) as {
+			const latest = await waitFor(() => {
+				const next = notifications.at(-1) as
+					| { files: Array<{ moduleName: string }> }
+					| undefined;
+				return next?.files.some(
+					(file) =>
+						file.moduleName === "@salesforce/apex/ContactController.count",
+				)
+					? next
+					: undefined;
+			});
+			expect(latest).toBeDefined();
+			const value = latest as {
 				files: Array<{ moduleName: string }>;
 			};
-			expect(latest.files.map((file) => file.moduleName)).toContain(
+			expect(value.files.map((file) => file.moduleName)).toContain(
 				"@salesforce/apex/ContactController.count",
 			);
 		} finally {
