@@ -61,28 +61,36 @@ describe("ApexVirtualTypeService", () => {
 
 			await service.initialize();
 
-			const payload = await waitFor(() => {
-				const next = payloads.at(-1) as
-					| {
-							workspace: string;
-							files: Array<{ moduleName: string; content: string }>;
-					  }
-					| undefined;
-				return next?.files[0]?.moduleName ===
-					"@salesforce/apex/ContactController.search"
-					? next
-					: undefined;
+			await waitFor(() => {
+				return payloads.length >= 2 ? true : undefined;
 			});
 
-			expect(payload).toMatchObject({ workspace });
+			const latestPayload = payloads.at(-1) as
+				| {
+						workspace: string;
+						files: Array<{ moduleName: string; content: string }>;
+				  }
+				| undefined;
+			const firstPayload = payloads[0] as
+				| {
+						workspace: string;
+						files: Array<{ moduleName: string; content: string }>;
+				  }
+				| undefined;
+			expect(firstPayload).toMatchObject({ workspace });
+			expect(firstPayload?.files[0]?.content).toContain("params: unknown");
+			expect(firstPayload?.files[0]?.content).toContain("Promise<unknown>");
+			expect(latestPayload).toMatchObject({ workspace });
 			const files = (
-				payload as { files: Array<{ moduleName: string; content: string }> }
+				latestPayload as {
+					files: Array<{ moduleName: string; content: string }>;
+				}
 			).files;
 			expect(files).toHaveLength(1);
 			expect(files[0]?.moduleName).toBe(
 				"@salesforce/apex/ContactController.search",
 			);
-			expect(files[0]?.content).toContain("ContactControllerSearchParams");
+			expect(files[0]?.content).toContain("query: string");
 			expect(files[0]?.content).toContain("Finds contacts matching the query.");
 			expect(files[0]?.content).toContain("Promise<unknown[]>");
 		} finally {
@@ -136,20 +144,15 @@ describe("ApexVirtualTypeService", () => {
 }`,
 			);
 
-			const latest = await waitFor(() => {
-				const next = notifications.at(-1) as
-					| { files: Array<{ moduleName: string }> }
-					| undefined;
-				return next?.files.some(
-					(file) =>
-						file.moduleName === "@salesforce/apex/ContactController.count",
-				)
-					? next
-					: undefined;
+			await waitFor(() => {
+				return notifications.length >= 2 ? true : undefined;
 			});
-			expect(latest).toBeDefined();
-			const value = latest as {
-				files: Array<{ moduleName: string }>;
+			const latestNotification = notifications.at(-1) as
+				| { files: Array<{ moduleName: string; content: string }> }
+				| undefined;
+			expect(latestNotification).toBeDefined();
+			const value = latestNotification as {
+				files: Array<{ moduleName: string; content: string }>;
 			};
 			expect(value.files.map((file) => file.moduleName)).toContain(
 				"@salesforce/apex/ContactController.count",

@@ -11,6 +11,8 @@ export function decorateLanguageService(
 	host: ts.LanguageServiceHost,
 	ls: ts.LanguageService,
 	vfs: VirtualFileStore,
+	projectService: ts.server.ProjectService,
+	project: ts.server.Project,
 	dispose: () => void,
 	resolveApexModule?: ApexModuleResolver,
 ) {
@@ -22,10 +24,25 @@ export function decorateLanguageService(
 		typescript,
 		host,
 		vfs,
+		projectService,
+		project,
 		resolveApexModule,
 	);
 	decorateLanguageServiceInner(ls, dispose);
 	return ls;
+}
+
+function isVirtualApexPath(normalizedPath: string) {
+	return normalizedPath.includes("/.tatzeroko/virtual/apex/");
+}
+
+function synthesizeVirtualApexContent(normalizedPath: string) {
+	const fileName = path.basename(normalizedPath, ".d.ts");
+	const [, methodName] = fileName.split(".");
+	if (!methodName) {
+		return undefined;
+	}
+	return `export default function ${methodName}(params: unknown): Promise<unknown>;`;
 }
 
 function decorateLanguageServiceHost(
@@ -33,6 +50,8 @@ function decorateLanguageServiceHost(
 	typescript: typeof ts,
 	host: ts.LanguageServiceHost,
 	vfs: VirtualFileStore,
+	projectService: ts.server.ProjectService,
+	project: ts.server.Project,
 	resolveApexModule?: ApexModuleResolver,
 ) {
 	const orig = {
@@ -68,11 +87,41 @@ function decorateLanguageServiceHost(
 		if (!resolvedFileName) {
 			return undefined;
 		}
+		ensurePlaceholderVirtualFile(resolvedFileName);
 		return {
 			extension: typescript.Extension.Dts,
 			isExternalLibraryImport: true,
 			resolvedFileName,
 		};
+	};
+
+	const ensurePlaceholderVirtualFile = (normalizedPath: string) => {
+		const normalizedVirtualPath = normalizedPath as ts.server.NormalizedPath;
+		if (vfs.has(normalizedPath)) {
+			return;
+		}
+		const content = synthesizeVirtualApexContent(normalizedPath);
+		if (!content) {
+			return;
+		}
+		console.log(
+			`[tatzeroko-plugin] ensurePlaceholderVirtualFile path=${normalizedPath} length=${content.length}`,
+		);
+		vfs.set(normalizedPath, content);
+		const scriptInfo = projectService.getOrCreateScriptInfoForNormalizedPath(
+			normalizedVirtualPath,
+			true,
+			content,
+		);
+		if (scriptInfo) {
+			try {
+				project.addRoot(scriptInfo);
+			} catch (error) {
+				console.log(
+					`[tatzeroko-plugin] ensurePlaceholderVirtualFile addRoot failed path=${normalizedPath} error=${String(error)}`,
+				);
+			}
+		}
 	};
 
 	host.getScriptFileNames = () => {
@@ -126,7 +175,7 @@ function decorateLanguageServiceHost(
 		const normalized = typescript.server.toNormalizedPath(fileName);
 		const exists =
 			vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
-		if (normalized.includes("/.tatzeroko/virtual/apex/")) {
+		if (isVirtualApexPath(normalized)) {
 			console.log(
 				`[tatzeroko-plugin] fileExists path=${normalized} exists=${exists}`,
 			);
@@ -146,12 +195,7 @@ function decorateLanguageServiceHost(
 				`[tatzeroko-plugin] directoryExists path=${normalized} exists=${exists}`,
 			);
 		}
-		if (
-			Array.from(vfs.list()).some((file) => file.startsWith(`${normalized}/`))
-		) {
-			return true;
-		}
-		return orig.directoryExists?.(directoryName) ?? false;
+		return exists;
 	};
 
 	host.readDirectory = (

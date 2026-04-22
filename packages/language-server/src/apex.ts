@@ -7,6 +7,7 @@ import type {
 	DidChangeWatchedFilesParams,
 } from "vscode-languageserver/node";
 
+import { generateApexVirtualFiles } from "./apex-generator";
 import { ApexWorkerClient } from "./apex-worker-client";
 
 export type ApexVirtualFile = {
@@ -56,30 +57,6 @@ export class ApexVirtualTypeService {
 	private generationTimer?: ReturnType<typeof setTimeout>;
 	private generationTicket = 0;
 	private workspaceRevision = 0;
-	private readonly presetSource = `global with sharing class ContactController {
-    /**
-     * @description Executes a search using either SOQL or SOSL based on search criteria.
-     *
-     * @param searchCriteria The search criteria in JSON format.
-     * @param offset The number of records to skip.
-     * @param pageSize The number of records to return.
-     * @param sortField The field to sort the records by.
-     * @param sortDirection The direction to sort the records in (asc or desc).
-     *
-     * @return A DTO containing the search results and the total number of records.
-     */
-    @AuraEnabled(cacheable=true)
-    public static SearchResultsDTO search(
-        String objApiName,
-        String searchCriteria,
-        Integer offset,
-        Integer pageSize,
-        String sortField,
-        String sortDirection
-    ) {
-        return null;
-    }
-}`;
 
 	constructor(
 		private readonly connection: Connection,
@@ -91,20 +68,8 @@ export class ApexVirtualTypeService {
 
 	async initialize() {
 		console.log("[tatzeroko-language-server] apex service initialize");
-		this.log(
-			`apex service initialize workspace=${this.workspaceRoot} preset=${this.presetSource.length}`,
-		);
+		this.log(`apex service initialize workspace=${this.workspaceRoot}`);
 		this.workerClient = new ApexWorkerClient(this.workspaceRoot);
-		this.apexSources.set(
-			path.join(
-				this.workspaceRoot,
-				".tatzeroko",
-				"preset",
-				"ContactController.cls",
-			),
-			this.presetSource,
-		);
-		this.log(`seeded preset source count=${this.apexSources.size}`);
 		void this.refreshFromWorkspace();
 	}
 
@@ -216,6 +181,27 @@ export class ApexVirtualTypeService {
 		this.log(
 			`generateDefinitions sourcePaths=${sources.map(([filePath]) => filePath).join(",")}`,
 		);
+		const placeholderDefinitions = generateApexVirtualFiles(
+			this.workspaceRoot,
+			sources,
+			{ placeholder: true },
+		);
+		const placeholderMap = new Map(
+			placeholderDefinitions.map((definition) => [definition.path, definition]),
+		);
+		if (!this.definitionsAreEqual(this.definitions, placeholderMap)) {
+			this.log(
+				`generateDefinitions publishing placeholder files=${placeholderDefinitions.length} workspace=${this.workspaceRoot}`,
+			);
+			this.definitions.clear();
+			for (const [filePath, definition] of placeholderMap) {
+				this.definitions.set(filePath, definition);
+			}
+			await this.publishDefinitions({
+				workspace: this.workspaceRoot,
+				files: placeholderDefinitions,
+			});
+		}
 		const nextDefinitions = new Map<string, ApexVirtualFile>();
 		for (const file of await workerClient.generate(sources)) {
 			this.log(

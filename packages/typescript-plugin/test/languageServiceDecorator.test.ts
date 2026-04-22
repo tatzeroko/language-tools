@@ -78,6 +78,12 @@ describe("language-service decorator", () => {
 				host,
 				ls,
 				vfs,
+				{
+					getOrCreateScriptInfoForNormalizedPath: () => undefined,
+				} as never,
+				{
+					addRoot: () => undefined,
+				} as never,
 				() => ls.dispose(),
 				(moduleName) =>
 					moduleName === "@salesforce/apex/ContactController.search"
@@ -157,6 +163,12 @@ describe("language-service decorator", () => {
 				host,
 				ls,
 				vfs,
+				{
+					getOrCreateScriptInfoForNormalizedPath: () => undefined,
+				} as never,
+				{
+					addRoot: () => undefined,
+				} as never,
 				() => ls.dispose(),
 				(moduleName) =>
 					moduleName === "@salesforce/apex/ContactController.search"
