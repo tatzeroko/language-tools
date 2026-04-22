@@ -35,7 +35,6 @@ function init(modules: { typescript: typeof ts }) {
 		string,
 		ReadonlyArray<ApexPayloadFile>
 	>();
-	const hardcodedApexFiles = new Map<string, ReadonlyArray<ApexPayloadFile>>();
 
 	function create(info: ts.server.PluginCreateInfo) {
 		console.log(
@@ -94,15 +93,16 @@ function init(modules: { typescript: typeof ts }) {
 				info.languageServiceHost,
 				info.languageService,
 				context.vfs,
+				info.project.projectService,
+				info.project,
 				() => {},
-				(moduleName) => resolveApexModulePath(workspace, moduleName),
+				(moduleName: string) => resolveApexModulePath(workspace, moduleName),
 			);
 		}
 
 		info.project.projectService.logger.info(
 			`tatzeroko: created plugin context for ${workspace}`,
 		);
-		setHardcodedApexFiles(workspace);
 		applyWorkspaceApexFiles(workspace);
 
 		return decorateLanguageService(
@@ -111,8 +111,10 @@ function init(modules: { typescript: typeof ts }) {
 			info.languageServiceHost,
 			info.languageService,
 			context.vfs,
+			info.project.projectService,
+			info.project,
 			() => context.dispose(),
-			(moduleName) => resolveApexModulePath(workspace, moduleName),
+			(moduleName: string) => resolveApexModulePath(workspace, moduleName),
 		);
 	}
 
@@ -212,10 +214,7 @@ function init(modules: { typescript: typeof ts }) {
 	}
 
 	function applyWorkspaceApexFiles(workspace: string) {
-		const definitions = [
-			...(hardcodedApexFiles.get(workspace) ?? []),
-			...(workspaceApexDefinitions.get(workspace) ?? []),
-		];
+		const definitions = workspaceApexDefinitions.get(workspace) ?? [];
 		console.log(
 			`[tatzeroko-plugin] applyWorkspaceApexFiles workspace=${workspace} count=${definitions.length}`,
 		);
@@ -247,32 +246,6 @@ function init(modules: { typescript: typeof ts }) {
 		console.log(
 			`[tatzeroko-plugin] applyWorkspaceApexFiles done workspace=${workspace}`,
 		);
-	}
-
-	function setHardcodedApexFiles(workspace: string) {
-		console.log(
-			`[tatzeroko-plugin] setHardcodedApexFiles workspace=${workspace}`,
-		);
-		hardcodedApexFiles.set(workspace, [
-			{
-				path: path.join(
-					workspace,
-					".tatzeroko",
-					"virtual",
-					"apex",
-					"ContactController.search.d.ts",
-				),
-				moduleName: "@salesforce/apex/ContactController.search",
-				content: `/**
- * Finds contacts matching the query.
- * @param params - The parameters for this call.
- * @return matching contacts.
- */
-export default function search(params: {
-	query: string;
-}): Promise<unknown[]>;`,
-			},
-		]);
 	}
 
 	function getContextsForWorkspace(workspace: string) {
@@ -318,22 +291,10 @@ export default function search(params: {
 	function buildApexStateSnapshot(workspace?: string) {
 		const workspaces = workspace
 			? [workspace]
-			: Array.from(
-					new Set([
-						...hardcodedApexFiles.keys(),
-						...workspaceApexDefinitions.keys(),
-					]),
-				);
+			: Array.from(workspaceApexDefinitions.keys());
 		return {
 			success: true,
 			workspace: workspace ?? null,
-			hardcoded: Array.from(hardcodedApexFiles.entries()).map(
-				([ws, files]) => ({
-					workspace: ws,
-					count: files.length,
-					paths: files.map((file) => file.path),
-				}),
-			),
 			definitions: Array.from(workspaceApexDefinitions.entries()).map(
 				([ws, files]) => ({
 					workspace: ws,
@@ -387,11 +348,7 @@ export default function search(params: {
 			project.projectService.logger?.info?.(
 				`tatzeroko: seeding files for ${workspace}`,
 			);
-			setHardcodedApexFiles(workspace);
-			const definitions = [
-				...(hardcodedApexFiles.get(workspace) ?? []),
-				...(workspaceApexDefinitions.get(workspace) ?? []),
-			];
+			const definitions = workspaceApexDefinitions.get(workspace) ?? [];
 			project.projectService.logger?.info?.(
 				`tatzeroko: getExternalFiles workspace=${workspace} count=${definitions.length}`,
 			);
@@ -407,29 +364,6 @@ export default function search(params: {
 				}
 				loadFile(typescript, project, definition.path, definition.content);
 				files.push(typescript.server.toNormalizedPath(definition.path));
-			}
-			for (const [
-				ctxWorkspace,
-				definitionsForWorkspace,
-			] of workspaceApexDefinitions) {
-				if (!isWorkspaceMatch(workspace, ctxWorkspace)) {
-					continue;
-				}
-				for (const definition of definitionsForWorkspace) {
-					if (
-						files.includes(typescript.server.toNormalizedPath(definition.path))
-					) {
-						console.log(
-							`[tatzeroko-plugin] getExternalFiles skip duplicate path=${definition.path}`,
-						);
-						continue;
-					}
-					console.log(
-						`[tatzeroko-plugin] getExternalFiles extra path=${definition.path} workspace=${ctxWorkspace}`,
-					);
-					loadFile(typescript, project, definition.path, definition.content);
-					files.push(typescript.server.toNormalizedPath(definition.path));
-				}
 			}
 			return files;
 		},

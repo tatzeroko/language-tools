@@ -1,15 +1,17 @@
 import * as path from "node:path";
 
-// Native Tree-sitter bindings loaded via CommonJS so pnpm can build them locally.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Parser = require("tree-sitter");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const TsSfApex = require("tree-sitter-sfapex");
+type ApexParser = any;
+
+let cachedParser: ApexParser | null | undefined;
 
 export type ApexVirtualFile = {
 	readonly path: string;
 	readonly content: string;
 	readonly moduleName: string;
+};
+
+type ApexGenerationOptions = {
+	readonly placeholder?: boolean;
 };
 
 type ApexMethod = {
@@ -43,9 +45,10 @@ const PRIMITIVE_TYPE_MAP: Record<string, string> = {
 export function generateApexVirtualFiles(
 	workspaceRoot: string,
 	sources: ReadonlyArray<readonly [string, string]>,
+	options: ApexGenerationOptions = {},
 ) {
-	const parser = new Parser();
-	parser.setLanguage(TsSfApex.apex);
+	const placeholder = options.placeholder ?? false;
+	const parser = getApexParser();
 
 	const files: ApexVirtualFile[] = [];
 	for (const [, content] of sources) {
@@ -59,7 +62,7 @@ export function generateApexVirtualFiles(
 				);
 				files.push({
 					path: virtualPath,
-					content: renderModule(apexClass.name, method),
+					content: renderModuleWithMode(apexClass.name, method, placeholder),
 					moduleName,
 				});
 			}
@@ -69,7 +72,31 @@ export function generateApexVirtualFiles(
 	return files;
 }
 
-function parseApexFile(parser: any, content: string) {
+function getApexParser() {
+	if (cachedParser !== undefined) {
+		return cachedParser;
+	}
+
+	try {
+		// Native Tree-sitter bindings loaded lazily so startup never fails here.
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const Parser = require("tree-sitter");
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const TsSfApex = require("tree-sitter-sfapex");
+		const parser = new Parser();
+		parser.setLanguage(TsSfApex.apex);
+		cachedParser = parser as ApexParser;
+	} catch {
+		cachedParser = null;
+	}
+
+	return cachedParser;
+}
+
+function parseApexFile(parser: ApexParser | null, content: string) {
+	if (!parser) {
+		return parseApexFileFallback(content);
+	}
 	const tree = parser.parse(content);
 	const classes: ApexClass[] = [];
 
@@ -95,6 +122,45 @@ function parseApexFile(parser: any, content: string) {
 		if (methods.length > 0) {
 			classes.push({ name: className, methods });
 		}
+	}
+
+	return classes;
+}
+
+function parseApexFileFallback(content: string) {
+	const classes: ApexClass[] = [];
+	const classMatch = content.match(/class\s+(\w+)\s*\{/);
+	if (!classMatch) {
+		return classes;
+	}
+
+	const className = classMatch[1];
+	const methods: ApexMethod[] = [];
+	const methodPattern =
+		/@AuraEnabled[\s\S]*?(?:public|global)\s+static\s+([^\s]+)\s+(\w+)\s*\(([^)]*)\)/g;
+	for (const match of content.matchAll(methodPattern)) {
+		const returnType = match[1] ?? "void";
+		const methodName = match[2];
+		const params = (match[3] ?? "")
+			.split(",")
+			.map((chunk) => chunk.trim())
+			.filter(Boolean)
+			.map((param, index) => {
+				const pieces = param.split(/\s+/).filter(Boolean);
+				const type = pieces.length >= 2 ? pieces[0] : "unknown";
+				const name = pieces.length >= 2 ? pieces[1] : `arg${index}`;
+				return { name, type };
+			});
+		methods.push({
+			name: methodName,
+			params,
+			returnType,
+			docComment: undefined,
+		});
+	}
+
+	if (methods.length) {
+		classes.push({ name: className, methods });
 	}
 
 	return classes;
@@ -185,6 +251,20 @@ function renderModule(className: string, method: ApexMethod) {
 				.map((param) => `\t${param.name}: ${mapApexType(param.type)};`)
 				.join("\n")}\n}`;
 	return `${docBlock}export default function ${method.name}(params: ${paramsType}): Promise<${returnType}>;`;
+}
+
+function renderModuleWithMode(
+	className: string,
+	method: ApexMethod,
+	placeholder: boolean,
+) {
+	if (!placeholder) {
+		return renderModule(className, method);
+	}
+
+	const docBlock = buildDocBlock(method.docComment);
+	void className;
+	return `${docBlock}export default function ${method.name}(params: unknown): Promise<unknown>;`;
 }
 
 function buildDocBlock(docComment?: string) {
