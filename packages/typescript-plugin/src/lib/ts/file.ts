@@ -43,18 +43,21 @@ export function loadFile(
 		return;
 	}
 
-	try {
-		project.projectService.openClientFileWithNormalizedPath?.(
-			normalizedPath,
+	const scriptInfoWithContent = scriptInfo as unknown as {
+		getSnapshot?: () => {
+			getLength: () => number;
+			getText: (start: number, end: number) => string;
+		};
+		editContent?: (start: number, end: number, newText: string) => void;
+	};
+	const snapshot = scriptInfoWithContent.getSnapshot?.();
+	const existingText = snapshot?.getText(0, snapshot.getLength()) ?? undefined;
+	if (existingText !== fileContent && scriptInfoWithContent.editContent) {
+		console.log(`[tatzeroko-plugin] loadFile refresh path=${normalizedPath}`);
+		scriptInfoWithContent.editContent(
+			0,
+			snapshot?.getLength() ?? 0,
 			fileContent,
-			undefined,
-			false,
-			typescript.server.toNormalizedPath(project.getCurrentDirectory()),
-		);
-		console.log(`[tatzeroko-plugin] loadFile opened path=${normalizedPath}`);
-	} catch (error) {
-		console.log(
-			`[tatzeroko-plugin] loadFile openClientFileWithNormalizedPath failed path=${normalizedPath} error=${String(error)}`,
 		);
 	}
 
@@ -64,17 +67,6 @@ export function loadFile(
 	} catch (error) {
 		console.log(
 			`[tatzeroko-plugin] loadFile addRoot failed path=${normalizedPath} error=${String(error)}`,
-		);
-	}
-
-	try {
-		project.updateGraph?.();
-		console.log(
-			`[tatzeroko-plugin] loadFile updateGraph path=${normalizedPath}`,
-		);
-	} catch (error) {
-		console.log(
-			`[tatzeroko-plugin] loadFile updateGraph failed path=${normalizedPath} error=${String(error)}`,
 		);
 	}
 }
