@@ -177,21 +177,14 @@ function extractDocComment(methodNode: { previousNamedSibling?: any }) {
 }
 
 function renderModule(className: string, method: ApexMethod) {
-	const paramTypeName = `${capitalize(sanitizeIdentifier(className))}${capitalize(sanitizeIdentifier(method.name))}Params`;
-	const typeDef = buildParamType(paramTypeName, method.params);
 	const docBlock = buildDocBlock(method.docComment);
 	const returnType = mapApexType(method.returnType);
-	return `${typeDef}${docBlock}export default function ${method.name}(params: ${paramTypeName}): Promise<${returnType}>;`;
-}
-
-function buildParamType(typeName: string, params: ApexMethod["params"]) {
-	if (!params.length) {
-		return `type ${typeName} = Record<string, unknown>;\n\n`;
-	}
-	const fields = params
-		.map((param) => `\t${param.name}: ${mapApexType(param.type)};`)
-		.join("\n");
-	return `type ${typeName} = {\n${fields}\n};\n\n`;
+	const paramsType = !method.params.length
+		? "Record<string, unknown>"
+		: `{\n${method.params
+				.map((param) => `\t${param.name}: ${mapApexType(param.type)};`)
+				.join("\n")}\n}`;
+	return `${docBlock}export default function ${method.name}(params: ${paramsType}): Promise<${returnType}>;`;
 }
 
 function buildDocBlock(docComment?: string) {
@@ -280,8 +273,8 @@ function getVirtualFilePath(
 ) {
 	return path.join(
 		workspaceRoot,
-		"node_modules",
-		"@salesforce",
+		".tatzeroko",
+		"virtual",
 		"apex",
 		`${className}.${methodName}.d.ts`,
 	);

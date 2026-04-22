@@ -1,10 +1,15 @@
 {
-	"compilerOptions": {
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext",
-		"target": "ES2022",
-		"strict": true,
-		"noEmit": true
-	},
-	"include": ["src/**/*.ts"]
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "strict": true,
+    "noEmit": true,
+    "plugins": [
+      {
+        "name": "@tatzeroko/typescript-plugin"
+      }
+    ]
+  },
+  "include": ["src/**/*.ts"]
 }

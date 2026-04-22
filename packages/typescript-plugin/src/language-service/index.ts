@@ -14,6 +14,9 @@ export function decorateLanguageService(
 	dispose: () => void,
 	resolveApexModule?: ApexModuleResolver,
 ) {
+	console.log(
+		`[tatzeroko-plugin] decorateLanguageService workspace=${workspace} vfsCount=${vfs.list().length}`,
+	);
 	decorateLanguageServiceHost(
 		workspace,
 		typescript,
@@ -46,9 +49,18 @@ function decorateLanguageServiceHost(
 
 	const resolveApexModulePath = (moduleName: string) => {
 		if (!resolveApexModule) {
+			console.log(
+				`[tatzeroko-plugin] resolveApexModulePath no-resolver module=${moduleName}`,
+			);
 			return undefined;
 		}
-		return resolveApexModule(moduleName);
+		const resolved = resolveApexModule(moduleName);
+		if (moduleName.startsWith("@salesforce/apex/")) {
+			console.log(
+				`[tatzeroko-plugin] resolveApexModule module=${moduleName} resolved=${resolved ?? "undefined"}`,
+			);
+		}
+		return resolved;
 	};
 
 	const createApexResolvedModule = (moduleName: string) => {
@@ -65,13 +77,22 @@ function decorateLanguageServiceHost(
 
 	host.getScriptFileNames = () => {
 		const scriptFileNames = orig.getScriptFileNames?.() ?? [];
-		return [...scriptFileNames, ...vfs.list()];
+		const virtualFiles = vfs.list();
+		if (virtualFiles.length) {
+			console.log(
+				`[tatzeroko-plugin] getScriptFileNames virtual=${virtualFiles.join(",")}`,
+			);
+		}
+		return [...scriptFileNames, ...virtualFiles];
 	};
 
 	host.getScriptSnapshot = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
 		const content = vfs.get(normalized)?.buffer.toString("utf8");
 		if (content !== undefined) {
+			console.log(
+				`[tatzeroko-plugin] getScriptSnapshot virtual path=${normalized} length=${content.length}`,
+			);
 			return typescript.ScriptSnapshot.fromString(content);
 		}
 		return orig.getScriptSnapshot?.(fileName);
@@ -81,6 +102,9 @@ function decorateLanguageServiceHost(
 		const normalized = typescript.server.toNormalizedPath(fileName);
 		const version = vfs.get(normalized)?.version.toString();
 		if (version !== undefined) {
+			console.log(
+				`[tatzeroko-plugin] getScriptVersion virtual path=${normalized} version=${version}`,
+			);
 			return version;
 		}
 		return orig.getScriptVersion?.(fileName);
@@ -90,6 +114,9 @@ function decorateLanguageServiceHost(
 		const normalized = typescript.server.toNormalizedPath(fileName);
 		const content = vfs.get(normalized)?.buffer.toString("utf8");
 		if (content !== undefined) {
+			console.log(
+				`[tatzeroko-plugin] readFile virtual path=${normalized} length=${content.length}`,
+			);
 			return content;
 		}
 		return orig.readFile?.(fileName);
@@ -97,11 +124,28 @@ function decorateLanguageServiceHost(
 
 	host.fileExists = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
-		return vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
+		const exists =
+			vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
+		if (normalized.includes("/.tatzeroko/virtual/apex/")) {
+			console.log(
+				`[tatzeroko-plugin] fileExists path=${normalized} exists=${exists}`,
+			);
+		}
+		return exists;
 	};
 
 	host.directoryExists = (directoryName: string) => {
 		const normalized = typescript.server.toNormalizedPath(directoryName);
+		const exists =
+			Array.from(vfs.list()).some((file) =>
+				file.startsWith(`${normalized}/`),
+			) ||
+			(orig.directoryExists?.(directoryName) ?? false);
+		if (normalized.includes("/.tatzeroko/virtual/apex/")) {
+			console.log(
+				`[tatzeroko-plugin] directoryExists path=${normalized} exists=${exists}`,
+			);
+		}
 		if (
 			Array.from(vfs.list()).some((file) => file.startsWith(`${normalized}/`))
 		) {
@@ -136,6 +180,11 @@ function decorateLanguageServiceHost(
 				}
 				return Array.from(suffixes).some((ext) => file.endsWith(ext));
 			});
+		if (normalizedDir.includes("/.tatzeroko/virtual/apex/")) {
+			console.log(
+				`[tatzeroko-plugin] readDirectory path=${normalizedDir} base=${base.length} virtual=${virtualFiles.length} extensions=${Array.from(suffixes).join(",")}`,
+			);
+		}
 		return Array.from(new Set([...base, ...virtualFiles]));
 	};
 
@@ -160,10 +209,18 @@ function decorateLanguageServiceHost(
 		return moduleLiterals.map((moduleLiteral, index) => {
 			const moduleName = moduleLiteral.text;
 			const resolution = resolutions[index];
+			if (moduleName.startsWith("@salesforce/apex/")) {
+				console.log(
+					`[tatzeroko-plugin] resolveModuleNameLiterals module=${moduleName} containing=${containingFile} baseResolved=${resolution?.resolvedModule?.resolvedFileName ?? "undefined"}`,
+				);
+			}
 
 			if (moduleName.startsWith("@salesforce/apex/")) {
 				const resolvedModule = createApexResolvedModule(moduleName);
 				if (resolvedModule) {
+					console.log(
+						`[tatzeroko-plugin] resolveModuleNameLiterals apexHit module=${moduleName} resolved=${resolvedModule.resolvedFileName}`,
+					);
 					return { resolvedModule };
 				}
 			}
@@ -171,6 +228,9 @@ function decorateLanguageServiceHost(
 			if (!moduleName.startsWith("c/")) {
 				return resolution;
 			}
+			console.log(
+				`[tatzeroko-plugin] resolveModuleNameLiterals c-module containing=${containingFile} module=${moduleName}`,
+			);
 
 			const componentName = moduleName.substring(2);
 			for (const ctx of ProjectContext.getAllInWorkspace(workspace)) {
@@ -212,6 +272,24 @@ function decorateLanguageServiceHost(
 		options,
 		containingSourceFile,
 	) => {
+		const apexResolutions = moduleNames.map((moduleName) => {
+			if (!moduleName.startsWith("@salesforce/apex/")) {
+				return undefined;
+			}
+			return createApexResolvedModule(moduleName);
+		});
+		if (apexResolutions.some(Boolean)) {
+			return apexResolutions.map((resolution, index) => {
+				if (resolution) {
+					console.log(
+						`[tatzeroko-plugin] resolveModuleNames apexHit module=${moduleNames[index]} containing=${containingFile} resolved=${resolution.resolvedFileName}`,
+					);
+					return resolution;
+				}
+				return undefined;
+			});
+		}
+
 		const literals = moduleNames.map(
 			(text) => ({ text }) as ts.StringLiteralLike,
 		);
@@ -245,7 +323,9 @@ function decorateLanguageServiceInner(
 	ls: ts.LanguageService,
 	dispose: () => void,
 ) {
-	const orig = { dispose: ls.dispose?.bind(ls) };
+	const orig = {
+		dispose: ls.dispose?.bind(ls),
+	};
 	ls.dispose = () => {
 		dispose();
 		orig.dispose?.();
