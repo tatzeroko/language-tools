@@ -90,6 +90,10 @@ export class ApexVirtualTypeService {
 	) {}
 
 	async initialize() {
+		console.log("[tatzeroko-language-server] apex service initialize");
+		this.log(
+			`apex service initialize workspace=${this.workspaceRoot} preset=${this.presetSource.length}`,
+		);
 		this.workerClient = new ApexWorkerClient(this.workspaceRoot);
 		this.apexSources.set(
 			path.join(
@@ -100,62 +104,97 @@ export class ApexVirtualTypeService {
 			),
 			this.presetSource,
 		);
+		this.log(`seeded preset source count=${this.apexSources.size}`);
 		void this.refreshFromWorkspace();
 	}
 
 	async handleWatchedFiles(params: DidChangeWatchedFilesParams) {
+		this.log(
+			`watched files changes=${params.changes.length} ${params.changes.map((change) => `${change.type}:${change.uri}`).join(",")}`,
+		);
 		if (params.changes.some((change) => change.uri.endsWith(".cls"))) {
+			this.log("watched files matched .cls, refreshing workspace");
 			await this.refreshFromWorkspace();
+		} else {
+			this.log("watched files ignored, no .cls changes");
 		}
 	}
 
 	handleDocumentChanged(uri: string, text: string) {
 		const filePath = this.uriToPath(uri);
 		if (!filePath || !filePath.endsWith(".cls")) {
+			this.log(
+				`document changed ignored uri=${uri} path=${filePath ?? "undefined"}`,
+			);
 			return;
 		}
 		this.workspaceRevision += 1;
 		this.apexSources.set(filePath, text);
+		this.log(
+			`document changed path=${filePath} revision=${this.workspaceRevision} length=${text.length} sources=${this.apexSources.size}`,
+		);
 		void this.scheduleGeneration();
 	}
 
 	handleDocumentSaved(uri: string, text: string) {
 		const filePath = this.uriToPath(uri);
 		if (!filePath || !filePath.endsWith(".cls")) {
+			this.log(
+				`document saved ignored uri=${uri} path=${filePath ?? "undefined"}`,
+			);
 			return;
 		}
 		this.workspaceRevision += 1;
 		this.apexSources.set(filePath, text);
+		this.log(
+			`document saved path=${filePath} revision=${this.workspaceRevision} length=${text.length} sources=${this.apexSources.size}`,
+		);
 		void this.scheduleGeneration();
 	}
 
 	private async refreshFromWorkspace() {
 		const revision = this.workspaceRevision;
+		this.log(
+			`refreshFromWorkspace start revision=${revision} workspace=${this.workspaceRoot}`,
+		);
 		const apexFiles = await this.collectApexFiles(this.workspaceRoot);
+		this.log(`refreshFromWorkspace collected=${apexFiles.length}`);
 		const nextSources = new Map<string, string>();
 		for (const filePath of apexFiles) {
 			try {
 				nextSources.set(filePath, await fs.readFile(filePath, "utf8"));
+				this.log(`refreshFromWorkspace read file=${filePath}`);
 			} catch {
-				/** ignore unreadable files */
+				this.log(`refreshFromWorkspace unreadable file=${filePath}`);
 			}
 		}
 		if (revision !== this.workspaceRevision) {
+			this.log(
+				`refreshFromWorkspace aborted stale revision expected=${revision} actual=${this.workspaceRevision}`,
+			);
 			return;
 		}
 		this.apexSources.clear();
 		for (const [filePath, content] of nextSources) {
 			this.apexSources.set(filePath, content);
 		}
+		this.log(
+			`refreshFromWorkspace replaced sources count=${this.apexSources.size}`,
+		);
 		await this.scheduleGeneration();
 	}
 
 	private async scheduleGeneration() {
 		const ticket = ++this.generationTicket;
+		this.log(
+			`scheduleGeneration ticket=${ticket} revision=${this.workspaceRevision}`,
+		);
 		if (this.generationTimer) {
+			this.log("scheduleGeneration clearing existing timer");
 			clearTimeout(this.generationTimer);
 		}
 		this.generationTimer = setTimeout(() => {
+			this.log(`scheduleGeneration firing ticket=${ticket}`);
 			void this.generateDefinitions(ticket);
 		}, 0);
 	}
@@ -163,22 +202,43 @@ export class ApexVirtualTypeService {
 	private async generateDefinitions(ticket: number) {
 		const workerClient = this.workerClient;
 		if (!workerClient) {
+			this.log(`generateDefinitions skipped ticket=${ticket} reason=no-worker`);
 			return;
 		}
+		console.log(
+			"[tatzeroko-language-server] generating Apex definitions",
+			this.apexSources.size,
+		);
+		this.log(
+			`generateDefinitions start ticket=${ticket} sources=${this.apexSources.size} existingDefinitions=${this.definitions.size}`,
+		);
 		const sources = Array.from(this.apexSources.entries());
+		this.log(
+			`generateDefinitions sourcePaths=${sources.map(([filePath]) => filePath).join(",")}`,
+		);
 		const nextDefinitions = new Map<string, ApexVirtualFile>();
 		for (const file of await workerClient.generate(sources)) {
+			this.log(
+				`generateDefinitions worker file path=${file.path} module=${file.moduleName} length=${file.content.length}`,
+			);
 			nextDefinitions.set(file.path, file);
 		}
 
 		if (ticket !== this.generationTicket) {
+			this.log(
+				`generateDefinitions skipped stale ticket=${ticket} current=${this.generationTicket}`,
+			);
 			return;
 		}
 
 		if (this.definitionsAreEqual(this.definitions, nextDefinitions)) {
+			this.log(`generateDefinitions no changes ticket=${ticket}`);
 			return;
 		}
 
+		this.log(
+			`generateDefinitions changed ticket=${ticket} nextCount=${nextDefinitions.size}`,
+		);
 		this.definitions.clear();
 		for (const [filePath, definition] of nextDefinitions) {
 			this.definitions.set(filePath, definition);
@@ -188,6 +248,9 @@ export class ApexVirtualTypeService {
 			workspace: this.workspaceRoot,
 			files: Array.from(this.definitions.values()),
 		};
+		this.log(
+			`generateDefinitions publishing files=${payload.files.length} workspace=${payload.workspace}`,
+		);
 		await this.publishDefinitions(payload);
 	}
 
@@ -229,8 +292,17 @@ export class ApexVirtualTypeService {
 	}
 
 	private async publishDefinitions(payload: ApexTypesPayload) {
+		this.log(
+			`publishDefinitions start workspace=${payload.workspace} files=${payload.files.length}`,
+		);
 		await this.notifyTsServer(payload);
+		this.log(
+			`publishDefinitions tsserver notified workspace=${payload.workspace}`,
+		);
 		this.connection.sendNotification("tatzeroko/apexTypesUpdated", payload);
+		this.log(
+			`publishDefinitions notification sent workspace=${payload.workspace}`,
+		);
 	}
 
 	private definitionsAreEqual(
@@ -254,6 +326,7 @@ export class ApexVirtualTypeService {
 	}
 
 	private async collectApexFiles(root: string): Promise<string[]> {
+		this.log(`collectApexFiles start root=${root}`);
 		const result: string[] = [];
 		const stack = [root];
 		while (stack.length) {
@@ -262,30 +335,37 @@ export class ApexVirtualTypeService {
 			let entries: Dirent[];
 			try {
 				entries = await fs.readdir(dir, { withFileTypes: true });
+				this.log(`collectApexFiles dir=${dir} entries=${entries.length}`);
 			} catch {
+				this.log(`collectApexFiles unreadable dir=${dir}`);
 				continue;
 			}
 			for (const entry of entries) {
 				const fullPath = path.join(dir, entry.name);
 				if (entry.isDirectory()) {
 					if (entry.name === "node_modules" || entry.name.startsWith(".")) {
+						this.log(`collectApexFiles skipDir=${fullPath}`);
 						continue;
 					}
 					stack.push(fullPath);
 					continue;
 				}
 				if (entry.isFile() && fullPath.endsWith(".cls")) {
+					this.log(`collectApexFiles hit=${fullPath}`);
 					result.push(fullPath);
 				}
 			}
 		}
+		this.log(`collectApexFiles done root=${root} count=${result.length}`);
 		return result;
 	}
 
 	private parseApexFile(content: string) {
 		if (!this.parser) {
+			this.log("parseApexFile skipped reason=no-parser");
 			return [];
 		}
+		this.log(`parseApexFile start length=${content.length}`);
 		const tree = this.parser.parse(content);
 		const classes: ApexClass[] = [];
 
@@ -294,6 +374,7 @@ export class ApexVirtualTypeService {
 		)) {
 			const className = this.extractClassName(classNode);
 			if (!className) continue;
+			this.log(`parseApexFile class=${className}`);
 
 			const methods: ApexMethod[] = [];
 			for (const methodNode of classNode.descendantsOfType(
@@ -305,14 +386,25 @@ export class ApexVirtualTypeService {
 				const returnType = this.extractReturnType(methodNode);
 				const params = this.extractParameters(methodNode);
 				const docComment = this.extractDocComment(methodNode);
+				this.log(
+					`parseApexFile method=${className}.${methodName} return=${returnType} params=${params.length} doc=${docComment ? "yes" : "no"}`,
+				);
 				methods.push({ name: methodName, params, returnType, docComment });
 			}
 
 			if (methods.length > 0) {
+				this.log(
+					`parseApexFile classAccepted=${className} methods=${methods.length}`,
+				);
 				classes.push({ name: className, methods });
+			} else {
+				this.log(
+					`parseApexFile classSkipped=${className} reason=no-aura-methods`,
+				);
 			}
 		}
 
+		this.log(`parseApexFile done classes=${classes.length}`);
 		return classes;
 	}
 
@@ -393,11 +485,18 @@ export class ApexVirtualTypeService {
 	}
 
 	private renderModule(className: string, method: ApexMethod) {
-		const paramTypeName = `${this.capitalize(this.sanitizeIdentifier(className))}${this.capitalize(this.sanitizeIdentifier(method.name))}Params`;
-		const typeDef = this.buildParamType(paramTypeName, method.params);
 		const docBlock = this.buildDocBlock(method.docComment);
 		const returnType = this.mapApexType(method.returnType);
-		return `${typeDef}${docBlock}export default function ${method.name}(params: ${paramTypeName}): Promise<${returnType}>;`;
+		const paramsType = !method.params.length
+			? "Record<string, unknown>"
+			: `{\n${method.params
+					.map((param) => `\t${param.name}: ${this.mapApexType(param.type)};`)
+					.join("\n")}\n}`;
+		const rendered = `${docBlock}export default function ${method.name}(params: ${paramsType}): Promise<${returnType}>;`;
+		this.log(
+			`renderModule class=${className} method=${method.name} renderedLength=${rendered.length}`,
+		);
+		return rendered;
 	}
 
 	private buildParamType(typeName: string, params: ApexMethod["params"]) {
@@ -432,6 +531,7 @@ export class ApexVirtualTypeService {
 	}
 
 	private parseDocComment(comment: string) {
+		this.log(`parseDocComment length=${comment.length}`);
 		const raw = comment
 			.replace(/^\/\*\*/, "")
 			.replace(/\*\/$/, "")
@@ -473,27 +573,34 @@ export class ApexVirtualTypeService {
 		const trimmed = type.trim();
 		if (!trimmed) return "unknown";
 		if (PRIMITIVE_TYPE_MAP[trimmed]) {
+			this.log(
+				`mapApexType primitive=${trimmed} mapped=${PRIMITIVE_TYPE_MAP[trimmed]}`,
+			);
 			return PRIMITIVE_TYPE_MAP[trimmed];
 		}
 		const arrayMatch = trimmed.match(/^(?:List|Set)<(.+)>$/);
 		if (arrayMatch) {
+			this.log(`mapApexType collection=${trimmed}`);
 			return `${this.mapApexType(arrayMatch[1])}[]`;
 		}
 		const mapMatch = trimmed.match(/^Map<(.+),\s*(.+)>$/);
 		if (mapMatch) {
+			this.log(`mapApexType map=${trimmed}`);
 			return `Record<string, ${this.mapApexType(mapMatch[2])}>`;
 		}
 		if (trimmed.endsWith("[]")) {
+			this.log(`mapApexType array=${trimmed}`);
 			return `${this.mapApexType(trimmed.slice(0, -2))}[]`;
 		}
+		this.log(`mapApexType fallback=${trimmed}`);
 		return "unknown";
 	}
 
 	private getVirtualFilePath(className: string, methodName: string) {
 		return path.join(
 			this.workspaceRoot,
-			"node_modules",
-			"@salesforce",
+			".tatzeroko",
+			"virtual",
 			"apex",
 			`${className}.${methodName}.d.ts`,
 		);
@@ -510,11 +617,21 @@ export class ApexVirtualTypeService {
 
 	private uriToPath(uri: string) {
 		try {
-			return uri.startsWith("file://")
+			const result = uri.startsWith("file://")
 				? decodeURIComponent(new URL(uri).pathname)
 				: uri;
+			this.log(`uriToPath uri=${uri} path=${result}`);
+			return result;
 		} catch {
+			this.log(`uriToPath failed uri=${uri}`);
 			return undefined;
 		}
+	}
+
+	private log(message: string) {
+		console.log(`[tatzeroko-language-server] ${message}`);
+		this.connection.sendNotification("tatzeroko/log", {
+			message: `[tatzeroko] ${message}`,
+		});
 	}
 }

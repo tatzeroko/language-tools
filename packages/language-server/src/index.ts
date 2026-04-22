@@ -14,6 +14,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { type ApexTypesPayload, ApexVirtualTypeService } from "./apex";
 
 export const startServer = () => {
+	console.log("[tatzeroko-language-server] starting");
 	const connection = createConnection(ProposedFeatures.all);
 	const documents: TextDocuments<TextDocument> = new TextDocuments(
 		TextDocument,
@@ -36,6 +37,22 @@ export const startServer = () => {
 
 	const dispatchToTsserver = (payload: ApexTypesPayload) => {
 		latestApexTypes = payload;
+		console.log(
+			"[tatzeroko-language-server] dispatching Apex types",
+			payload.files.length,
+			payload.workspace,
+		);
+		connection.sendNotification("tatzeroko/log", {
+			message: `[tatzeroko] language-server dispatch workspace=${payload.workspace} files=${payload.files.length}`,
+		});
+		for (const file of payload.files) {
+			console.log(
+				`[tatzeroko-language-server] apex file path=${file.path} module=${file.moduleName} length=${file.content.length}`,
+			);
+		}
+		connection.sendNotification("tatzeroko/log", {
+			message: `[tatzeroko] dispatching Apex types ${payload.files.length} ${payload.workspace}`,
+		});
 		return _sendTsServerRequest("_tatzeroko/updateApexTypes", [payload]).catch(
 			() => {
 				/** ignore */
@@ -45,6 +62,18 @@ export const startServer = () => {
 
 	connection.onInitialize((params: InitializeParams): InitializeResult => {
 		const workspaceRoot = resolveWorkspaceRoot(params);
+		console.log("[tatzeroko-language-server] initialize", workspaceRoot);
+		console.log(
+			"[tatzeroko-language-server] initialize params",
+			JSON.stringify({
+				rootUri: params.rootUri,
+				rootPath: params.rootPath,
+				workspaceFolders: params.workspaceFolders?.map((folder) => folder.uri),
+			}),
+		);
+		connection.sendNotification("tatzeroko/log", {
+			message: `[tatzeroko] initialize ${workspaceRoot}`,
+		});
 		apexService = new ApexVirtualTypeService(
 			connection,
 			workspaceRoot,
@@ -63,22 +92,44 @@ export const startServer = () => {
 	});
 
 	connection.onHover((params: HoverParams): Hover | undefined => {
+		console.log(
+			"[tatzeroko-language-server] hover request",
+			params.textDocument.uri,
+			params.position.line,
+			params.position.character,
+		);
 		const document = documents.get(params.textDocument.uri);
 		if (!document || !latestApexTypes?.files.length) {
+			console.log(
+				"[tatzeroko-language-server] hover missing document-or-types",
+				document ? "document" : "no-document",
+				latestApexTypes?.files.length ?? 0,
+			);
 			return undefined;
 		}
 
 		const moduleName = findApexModuleAtPosition(document, params.position);
 		if (!moduleName) {
+			console.log("[tatzeroko-language-server] hover module not found");
 			return undefined;
 		}
+		console.log("[tatzeroko-language-server] hover module", moduleName);
 
 		const definition = latestApexTypes.files.find(
 			(file) => file.moduleName === moduleName,
 		);
 		if (!definition) {
+			console.log(
+				"[tatzeroko-language-server] hover definition missing",
+				moduleName,
+			);
 			return undefined;
 		}
+		console.log(
+			"[tatzeroko-language-server] hover definition hit",
+			definition.path,
+			definition.content.length,
+		);
 
 		return {
 			contents: {
@@ -89,10 +140,19 @@ export const startServer = () => {
 	});
 
 	connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams) => {
+		console.log(
+			"[tatzeroko-language-server] watched files",
+			params.changes.map((change) => `${change.type}:${change.uri}`).join(","),
+		);
 		void apexService?.handleWatchedFiles(params);
 	});
 
 	documents.onDidChangeContent((event) => {
+		console.log(
+			"[tatzeroko-language-server] document changed",
+			event.document.uri,
+			event.document.getText().length,
+		);
 		apexService?.handleDocumentChanged(
 			event.document.uri,
 			event.document.getText(),
@@ -100,6 +160,11 @@ export const startServer = () => {
 	});
 
 	documents.onDidSave((event) => {
+		console.log(
+			"[tatzeroko-language-server] document saved",
+			event.document.uri,
+			event.document.getText().length,
+		);
 		apexService?.handleDocumentSaved(
 			event.document.uri,
 			event.document.getText(),
@@ -107,8 +172,14 @@ export const startServer = () => {
 	});
 
 	connection.onNotification("tsserver/response", ([id, res]) => {
+		console.log("[tatzeroko-language-server] tsserver response", id, !!res);
 		tsserverRequestHandlers.get(id)?.(res);
 		tsserverRequestHandlers.delete(id);
+	});
+
+	connection.onNotification("tatzeroko/log", ({ message }) => {
+		console.log("[tatzeroko-language-server] log relay", message);
+		console.log(message);
 	});
 
 	documents.listen(connection);

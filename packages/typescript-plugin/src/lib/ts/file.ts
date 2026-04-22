@@ -12,45 +12,71 @@ export function loadFile(
 	typescript: typeof ts,
 	project: ts.server.Project,
 	path: string,
-	content: string,
+	content?: string,
 ) {
 	const normalizedPath = typescript.server.toNormalizedPath(path);
-	if (project.containsFile(normalizedPath)) {
+	const fileContent = content ?? project.readFile(normalizedPath);
+	console.log(
+		`[tatzeroko-plugin] loadFile start path=${normalizedPath} source=${content ? "provided" : "project.readFile"}`,
+	);
+	if (fileContent === undefined) {
+		console.log(
+			`[tatzeroko-plugin] loadFile skipped path=${normalizedPath} reason=no-content`,
+		);
 		return;
 	}
+	console.log(
+		`[tatzeroko-plugin] loadFile path=${normalizedPath} contentLength=${fileContent.length} contains=${project.containsFile(normalizedPath)}`,
+	);
 
 	const scriptInfo =
 		project.projectService.getOrCreateScriptInfoForNormalizedPath(
 			normalizedPath,
 			/*openedByClient*/ true,
-			content,
+			fileContent,
 		);
 
 	if (!scriptInfo) {
+		console.log(
+			`[tatzeroko-plugin] loadFile skipped path=${normalizedPath} reason=no-script-info`,
+		);
 		return;
 	}
 
-	if (!project.projectService.openFiles.has(scriptInfo.path)) {
-		project.projectService.openFiles.set(scriptInfo.path, undefined);
-	}
-
 	try {
-		project.projectService.openClientFileWithNormalizedPath(
+		project.projectService.openClientFileWithNormalizedPath?.(
 			normalizedPath,
-			content,
+			fileContent,
 			undefined,
 			false,
 			typescript.server.toNormalizedPath(project.getCurrentDirectory()),
 		);
-	} catch {
-		try {
-			project.addRoot(scriptInfo);
-		} catch {
-			/** ignore project root insertion issues for virtual files */
-		}
+		console.log(`[tatzeroko-plugin] loadFile opened path=${normalizedPath}`);
+	} catch (error) {
+		console.log(
+			`[tatzeroko-plugin] loadFile openClientFileWithNormalizedPath failed path=${normalizedPath} error=${String(error)}`,
+		);
 	}
 
-	project.updateGraph();
+	console.log(`[tatzeroko-plugin] loadFile addRoot path=${normalizedPath}`);
+	try {
+		project.addRoot(scriptInfo);
+	} catch (error) {
+		console.log(
+			`[tatzeroko-plugin] loadFile addRoot failed path=${normalizedPath} error=${String(error)}`,
+		);
+	}
+
+	try {
+		project.updateGraph?.();
+		console.log(
+			`[tatzeroko-plugin] loadFile updateGraph path=${normalizedPath}`,
+		);
+	} catch (error) {
+		console.log(
+			`[tatzeroko-plugin] loadFile updateGraph failed path=${normalizedPath} error=${String(error)}`,
+		);
+	}
 }
 
 /**
@@ -66,8 +92,12 @@ export function unloadFile(
 	path: string,
 ) {
 	const normalizedPath = typescript.server.toNormalizedPath(path);
+	console.log(`[tatzeroko-plugin] unloadFile path=${normalizedPath}`);
 	const scriptInfo = project.projectService.getScriptInfo(normalizedPath);
 	if (!scriptInfo) {
+		console.log(
+			`[tatzeroko-plugin] unloadFile skipped path=${normalizedPath} reason=no-script-info`,
+		);
 		return;
 	}
 
@@ -76,7 +106,5 @@ export function unloadFile(
 		/*fileExists*/ false,
 		/*detachFromProject*/ true,
 	);
-	project.projectService.openFiles.delete(scriptInfo.path);
-
-	project.updateGraph();
+	console.log(`[tatzeroko-plugin] unloadFile updated path=${normalizedPath}`);
 }
