@@ -5,7 +5,7 @@ global with sharing class ContactController {
 	 * @return matching contacts.
 	 */
 	@AuraEnabled(cacheable=true)
-	public static List<Contact> search(Integer query) {
+	public static List<Contact> search(String query) {
 		return new List<Contact>();
 	}
 }

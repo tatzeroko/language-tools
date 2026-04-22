@@ -80,6 +80,7 @@ describe("ApexVirtualTypeService", () => {
 			expect(firstPayload).toMatchObject({ workspace });
 			expect(firstPayload?.files[0]?.content).toContain("params: unknown");
 			expect(firstPayload?.files[0]?.content).toContain("Promise<unknown>");
+			expect(firstPayload?.files[0]?.content).toContain("@param params.query");
 			expect(latestPayload).toMatchObject({ workspace });
 			const files = (
 				latestPayload as {
@@ -93,6 +94,82 @@ describe("ApexVirtualTypeService", () => {
 			expect(files[0]?.content).toContain("query: string");
 			expect(files[0]?.content).toContain("Finds contacts matching the query.");
 			expect(files[0]?.content).toContain("Promise<unknown[]>");
+		} finally {
+			fs.rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("refreshes generated typings when a watched Apex file changes on disk", async () => {
+		const workspace = fs.mkdtempSync(
+			path.join(process.cwd(), "apex-workspace-"),
+		);
+		try {
+			const apexPath = path.join(
+				workspace,
+				"force-app",
+				"main",
+				"default",
+				"classes",
+				"ContactController.cls",
+			);
+			fs.mkdirSync(path.dirname(apexPath), { recursive: true });
+			fs.writeFileSync(
+				apexPath,
+				`global with sharing class ContactController {
+    @AuraEnabled(cacheable=true)
+    public static List<Contact> search(String query) {
+        return new List<Contact>();
+    }
+}`,
+				"utf8",
+			);
+
+			const payloads: Array<{
+				workspace: string;
+				files: Array<{ moduleName: string; content: string }>;
+			}> = [];
+			const service = new ApexVirtualTypeService(
+				{
+					sendNotification: () => undefined,
+				} as never,
+				workspace,
+				async (next) => {
+					payloads.push(next as (typeof payloads)[number]);
+					return undefined;
+				},
+			);
+
+			await service.initialize();
+			await waitFor(() => (payloads.length >= 2 ? true : undefined));
+
+			fs.writeFileSync(
+				apexPath,
+				`global with sharing class ContactController {
+    @AuraEnabled(cacheable=true)
+    public static List<Contact> search(String query) {
+        return new List<Contact>();
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Integer count() {
+        return 0;
+    }
+}`,
+				"utf8",
+			);
+
+			await waitFor(() =>
+				payloads.some((payload) =>
+					payload.files.some((file) => file.moduleName.endsWith(".count")),
+				)
+					? true
+					: undefined,
+			);
+
+			const latestPayload = payloads.at(-1);
+			expect(latestPayload?.files.map((file) => file.moduleName)).toContain(
+				"@salesforce/apex/ContactController.count",
+			);
 		} finally {
 			fs.rmSync(workspace, { recursive: true, force: true });
 		}

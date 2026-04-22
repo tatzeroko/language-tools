@@ -281,6 +281,9 @@ function buildDocBlock(docComment?: string) {
 	lines.push(
 		` * @param params - ${info.paramSummary ?? "The parameters for this call."}`,
 	);
+	for (const [name, description] of info.paramDocs) {
+		lines.push(` * @param params.${name} - ${description}`);
+	}
 	if (info.returns) {
 		lines.push(` * @return ${info.returns}`);
 	}
@@ -298,20 +301,27 @@ function parseDocComment(comment: string) {
 	const info: {
 		description?: string;
 		paramSummary?: string;
+		paramDocs: Map<string, string>;
 		returns?: string;
-	} = {};
+	} = { paramDocs: new Map() };
 	let mode: "description" | "param" | "return" = "description";
+	let currentParamName: string | undefined;
 	for (const line of raw) {
 		const tagMatch = line.match(/^@(param|return)\s+(.*)$/);
 		if (tagMatch) {
 			mode = tagMatch[1] === "param" ? "param" : "return";
 			if (mode === "param") {
 				const paramMatch = tagMatch[2].match(/^(\w+)\s*-?\s*(.*)$/);
-				if (paramMatch && paramMatch[1] === "params") {
-					info.paramSummary = paramMatch[2].trim();
+				currentParamName = paramMatch?.[1];
+				const paramDescription = paramMatch?.[2].trim() ?? "";
+				if (currentParamName === "params") {
+					info.paramSummary = paramDescription;
+				} else if (currentParamName) {
+					info.paramDocs.set(currentParamName, paramDescription);
 				}
 			} else {
 				info.returns = tagMatch[2].trim();
+				currentParamName = undefined;
 			}
 			continue;
 		}
@@ -319,6 +329,15 @@ function parseDocComment(comment: string) {
 			info.description = info.description
 				? `${info.description} ${line}`
 				: line;
+		} else if (
+			mode === "param" &&
+			currentParamName &&
+			currentParamName !== "params"
+		) {
+			info.paramDocs.set(
+				currentParamName,
+				`${info.paramDocs.get(currentParamName) ?? ""} ${line}`.trim(),
+			);
 		} else if (mode === "return") {
 			info.returns = info.returns ? `${info.returns} ${line}`.trim() : line;
 		}
