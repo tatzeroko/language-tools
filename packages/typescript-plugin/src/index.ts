@@ -164,7 +164,6 @@ function init(modules: { typescript: typeof ts }) {
 				);
 			}
 			workspaceApexDefinitions.set(normalizedWorkspace, files);
-			seedFilesInProjectService(session, normalizedWorkspace, files);
 			applyWorkspaceApexFiles(normalizedWorkspace);
 			logger.info(
 				`tatzeroko: updateApexTypes applied workspace=${normalizedWorkspace}`,

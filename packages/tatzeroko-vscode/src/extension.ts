@@ -13,10 +13,6 @@ import { findTsProbeFile } from "./transport";
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 
-const TATZEROKO_PLUGIN_NAME = "@tatzeroko/typescript-plugin";
-
-let tatzerokoPluginConfigured = false;
-
 type ApexUpdateRequest = {
 	readonly workspace?: string;
 	readonly files?: ReadonlyArray<{
@@ -105,7 +101,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		const forward = async (attempt = 0): Promise<void> => {
 			try {
-				await ensureTatzerokoPluginConfigured();
 				outputChannel?.appendLine(
 					`[tatzeroko] forwarding command=${command} attempt=${attempt}`,
 				);
@@ -130,6 +125,38 @@ export async function activate(context: vscode.ExtensionContext) {
 						);
 					}
 				}
+				if (command === "_tatzeroko/updateApexTypes") {
+					void Promise.resolve(
+						vscode.commands.executeCommand<{ body?: unknown } | undefined>(
+							"typescript.tsserverRequest",
+							command,
+							args,
+							{ isAsync: true, lowPriority: true },
+						),
+					)
+						.then((res) => {
+							outputChannel?.appendLine(
+								`[tatzeroko] tsserver raw response command=${command} hasBody=${res?.body !== undefined}`,
+							);
+							if (res?.body !== undefined) {
+								outputChannel?.appendLine(
+									`[tatzeroko] updateApexTypes response=${JSON.stringify(res.body)}`,
+								);
+							}
+						})
+						.catch((error: unknown) => {
+							outputChannel?.appendLine(
+								`[tatzeroko] tsserver request error ${String(error)}`,
+							);
+						});
+					console.log("[tatzeroko] tsserver response", command, false);
+					outputChannel?.appendLine(
+						`[tatzeroko] tsserver response ${command} empty`,
+					);
+					client?.sendNotification("tsserver/response", [seq, undefined]);
+					return;
+				}
+
 				const res = (
 					await withTimeout(
 						vscode.commands.executeCommand<{ body?: unknown } | undefined>(
@@ -149,16 +176,6 @@ export async function activate(context: vscode.ExtensionContext) {
 						`[tatzeroko] updateApexTypes response=${JSON.stringify(res)}`,
 					);
 				}
-				if (
-					res === undefined &&
-					command === "_tatzeroko/updateApexTypes" &&
-					attempt < 4
-				) {
-					outputChannel?.appendLine(
-						`[tatzeroko] retrying command=${command} nextAttempt=${attempt + 1}`,
-					);
-					setTimeout(() => void forward(attempt + 1), 250 * (attempt + 1));
-				}
 				console.log("[tatzeroko] tsserver response", command, !!res);
 				outputChannel?.appendLine(
 					`[tatzeroko] tsserver response ${command} ${res ? "ok" : "empty"}`,
@@ -177,12 +194,6 @@ export async function activate(context: vscode.ExtensionContext) {
 				outputChannel?.appendLine(
 					`[tatzeroko] tsserver request error ${String(error)}`,
 				);
-				if (command === "_tatzeroko/updateApexTypes" && attempt < 4) {
-					outputChannel?.appendLine(
-						`[tatzeroko] retrying after error command=${command} nextAttempt=${attempt + 1}`,
-					);
-					setTimeout(() => void forward(attempt + 1), 250 * (attempt + 1));
-				}
 				client?.sendNotification("tsserver/response", [seq, undefined]);
 			}
 		};
@@ -204,7 +215,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 
 	client.start();
-	void ensureTatzerokoPluginConfigured();
 }
 
 export function deactivate() {
@@ -222,41 +232,4 @@ async function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number) {
 			);
 		}),
 	]);
-}
-
-async function ensureTatzerokoPluginConfigured(attempt = 0): Promise<void> {
-	if (tatzerokoPluginConfigured) {
-		return;
-	}
-
-	outputChannel?.appendLine(
-		`[tatzeroko] enabling tsserver plugin ${TATZEROKO_PLUGIN_NAME} attempt=${attempt}`,
-	);
-
-	try {
-		await withTimeout(
-			vscode.commands.executeCommand(
-				"typescript.configurePlugin",
-				TATZEROKO_PLUGIN_NAME,
-				{},
-			),
-			5000,
-		);
-		tatzerokoPluginConfigured = true;
-		outputChannel?.appendLine("[tatzeroko] tsserver plugin configured");
-	} catch (error) {
-		outputChannel?.appendLine(
-			`[tatzeroko] tsserver plugin configure failed attempt=${attempt} error=${String(error)}`,
-		);
-		if (
-			String(error).includes("command 'typescript.configurePlugin' not found")
-		) {
-			return;
-		}
-		if (attempt >= 5) {
-			return;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
-		await ensureTatzerokoPluginConfigured(attempt + 1);
-	}
 }

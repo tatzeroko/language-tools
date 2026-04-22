@@ -1,8 +1,6 @@
 import {
 	createConnection,
 	type DidChangeWatchedFilesParams,
-	type Hover,
-	type HoverParams,
 	type InitializeParams,
 	type InitializeResult,
 	ProposedFeatures,
@@ -24,7 +22,6 @@ export const startServer = () => {
 	// biome-ignore lint/suspicious/noExplicitAny: Needed for dynamic handlers
 	const tsserverRequestHandlers = new Map<number, (res: any) => void>();
 	let apexService: ApexVirtualTypeService | undefined;
-	let latestApexTypes: ApexTypesPayload | undefined;
 
 	/** Not in use at the moment */
 	async function _sendTsServerRequest<T>(command: string, args: unknown[]) {
@@ -36,7 +33,6 @@ export const startServer = () => {
 	}
 
 	const dispatchToTsserver = (payload: ApexTypesPayload) => {
-		latestApexTypes = payload;
 		console.log(
 			"[tatzeroko-language-server] dispatching Apex types",
 			payload.files.length,
@@ -53,11 +49,13 @@ export const startServer = () => {
 		connection.sendNotification("tatzeroko/log", {
 			message: `[tatzeroko] dispatching Apex types ${payload.files.length} ${payload.workspace}`,
 		});
-		return _sendTsServerRequest("_tatzeroko/updateApexTypes", [payload]).catch(
-			() => {
-				/** ignore */
-			},
-		);
+		const id = ++seq;
+		connection.sendNotification("tsserver/request", [
+			id,
+			"_tatzeroko/updateApexTypes",
+			[payload],
+		]);
+		return Promise.resolve(null);
 	};
 
 	connection.onInitialize((params: InitializeParams): InitializeResult => {
@@ -85,56 +83,7 @@ export const startServer = () => {
 
 		return {
 			capabilities: {
-				hoverProvider: true,
 				textDocumentSync: TextDocumentSyncKind.Incremental,
-			},
-		};
-	});
-
-	connection.onHover((params: HoverParams): Hover | undefined => {
-		console.log(
-			"[tatzeroko-language-server] hover request",
-			params.textDocument.uri,
-			params.position.line,
-			params.position.character,
-		);
-		const document = documents.get(params.textDocument.uri);
-		if (!document || !latestApexTypes?.files.length) {
-			console.log(
-				"[tatzeroko-language-server] hover missing document-or-types",
-				document ? "document" : "no-document",
-				latestApexTypes?.files.length ?? 0,
-			);
-			return undefined;
-		}
-
-		const moduleName = findApexModuleAtPosition(document, params.position);
-		if (!moduleName) {
-			console.log("[tatzeroko-language-server] hover module not found");
-			return undefined;
-		}
-		console.log("[tatzeroko-language-server] hover module", moduleName);
-
-		const definition = latestApexTypes.files.find(
-			(file) => file.moduleName === moduleName,
-		);
-		if (!definition) {
-			console.log(
-				"[tatzeroko-language-server] hover definition missing",
-				moduleName,
-			);
-			return undefined;
-		}
-		console.log(
-			"[tatzeroko-language-server] hover definition hit",
-			definition.path,
-			definition.content.length,
-		);
-
-		return {
-			contents: {
-				kind: "markdown",
-				value: `\`\`\`ts\n${definition.content}\n\`\`\``,
 			},
 		};
 	});
@@ -200,34 +149,4 @@ function resolveWorkspaceRoot(params?: Partial<InitializeParams>) {
 		return params.rootUri.replace(/^file:\/\//, "");
 	}
 	return params?.rootPath ?? process.cwd();
-}
-
-function findApexModuleAtPosition(
-	document: TextDocument,
-	position: { line: number; character: number },
-) {
-	const text = document.getText();
-	const offset = document.offsetAt(position);
-	let start = offset;
-	let end = offset;
-	while (start > 0 && /[A-Za-z0-9_$]/.test(text.charAt(start - 1))) {
-		start -= 1;
-	}
-	while (end < text.length && /[A-Za-z0-9_$]/.test(text.charAt(end))) {
-		end += 1;
-	}
-	const localName = text.slice(start, end);
-	if (!localName) {
-		return undefined;
-	}
-
-	const importPattern =
-		/import\s+([A-Za-z_$][\w$]*)\s+from\s+["'](@salesforce\/apex\/[^"']+)["'];?/g;
-	for (const match of text.matchAll(importPattern)) {
-		if (match[1] === localName) {
-			return match[2];
-		}
-	}
-
-	return undefined;
 }
