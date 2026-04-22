@@ -1,4 +1,5 @@
 import type { Dirent } from "node:fs";
+import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -54,6 +55,9 @@ export class ApexVirtualTypeService {
 	private readonly apexSources = new Map<string, string>();
 	private readonly definitions = new Map<string, ApexVirtualFile>();
 	private workerClient?: ApexWorkerClient;
+	private workspaceWatchers: fsSync.FSWatcher[] = [];
+	private workspaceRefreshTimer?: ReturnType<typeof setTimeout>;
+	private workspaceWatcherMode: "recursive" | "directories" | "none" = "none";
 	private generationTimer?: ReturnType<typeof setTimeout>;
 	private generationTicket = 0;
 	private workspaceRevision = 0;
@@ -70,6 +74,7 @@ export class ApexVirtualTypeService {
 		console.log("[tatzeroko-language-server] apex service initialize");
 		this.log(`apex service initialize workspace=${this.workspaceRoot}`);
 		this.workerClient = new ApexWorkerClient(this.workspaceRoot);
+		await this.startWorkspaceWatcher();
 		void this.refreshFromWorkspace();
 	}
 
@@ -147,6 +152,119 @@ export class ApexVirtualTypeService {
 			`refreshFromWorkspace replaced sources count=${this.apexSources.size}`,
 		);
 		await this.scheduleGeneration();
+		if (this.workspaceWatcherMode === "directories") {
+			await this.refreshDirectoryWatchers();
+		}
+	}
+
+	private async startWorkspaceWatcher() {
+		if (this.workspaceWatchers.length || this.workspaceWatcherMode !== "none") {
+			return;
+		}
+
+		try {
+			const watcher = fsSync.watch(
+				this.workspaceRoot,
+				{ recursive: true },
+				(eventType, filename) => {
+					this.log(
+						`workspace watcher event mode=recursive type=${eventType} file=${String(filename ?? "undefined")}`,
+					);
+					void this.scheduleWorkspaceRefresh();
+				},
+			);
+			this.workspaceWatchers = [watcher];
+			this.workspaceWatcherMode = "recursive";
+			this.log(
+				`workspace watcher started mode=recursive root=${this.workspaceRoot}`,
+			);
+			return;
+		} catch (error) {
+			this.log(
+				`workspace watcher recursive failed root=${this.workspaceRoot} error=${String(error)}`,
+			);
+		}
+
+		this.workspaceWatcherMode = "directories";
+		await this.refreshDirectoryWatchers();
+	}
+
+	private async refreshDirectoryWatchers() {
+		this.closeWorkspaceWatchers();
+		this.log(
+			`workspace watcher refreshing directories root=${this.workspaceRoot}`,
+		);
+		const directories = await this.collectApexDirectories(this.workspaceRoot);
+		for (const directory of directories) {
+			try {
+				const watcher = fsSync.watch(directory, (eventType, filename) => {
+					this.log(
+						`workspace watcher event mode=directories dir=${directory} type=${eventType} file=${String(filename ?? "undefined")}`,
+					);
+					void this.scheduleWorkspaceRefresh();
+				});
+				watcher.on("error", (error) => {
+					this.log(
+						`workspace watcher error dir=${directory} error=${String(error)}`,
+					);
+				});
+				this.workspaceWatchers.push(watcher);
+			} catch (error) {
+				this.log(
+					`workspace watcher directory failed dir=${directory} error=${String(error)}`,
+				);
+			}
+		}
+	}
+
+	private closeWorkspaceWatchers() {
+		for (const watcher of this.workspaceWatchers) {
+			try {
+				watcher.close();
+			} catch {
+				// Ignore watcher shutdown errors.
+			}
+		}
+		this.workspaceWatchers = [];
+	}
+
+	private scheduleWorkspaceRefresh() {
+		if (this.workspaceRefreshTimer) {
+			clearTimeout(this.workspaceRefreshTimer);
+		}
+		this.workspaceRefreshTimer = setTimeout(() => {
+			void this.refreshFromWorkspace();
+		}, 50);
+	}
+
+	private async collectApexDirectories(root: string): Promise<string[]> {
+		this.log(`collectApexDirectories start root=${root}`);
+		const result = new Set<string>([root]);
+		const stack = [root];
+		while (stack.length) {
+			const dir = stack.pop();
+			if (!dir) continue;
+			let entries: Dirent[];
+			try {
+				entries = await fs.readdir(dir, { withFileTypes: true });
+			} catch {
+				continue;
+			}
+			for (const entry of entries) {
+				if (!entry.isDirectory()) continue;
+				if (entry.name === "node_modules" || entry.name.startsWith(".")) {
+					continue;
+				}
+				const fullPath = path.join(dir, entry.name);
+				result.add(fullPath);
+				stack.push(fullPath);
+			}
+		}
+		const directories = Array.from(result);
+		this.log(
+			`collectApexDirectories done root=${root} count=${directories.length}`,
+		);
+		return directories;
 	}
 
 	private async scheduleGeneration() {
@@ -509,6 +627,9 @@ export class ApexVirtualTypeService {
 		lines.push(
 			` * @param params - ${info.paramSummary ?? "The parameters for this call."}`,
 		);
+		for (const [name, description] of info.paramDocs) {
+			lines.push(` * @param params.${name} - ${description}`);
+		}
 		if (info.returns) {
 			lines.push(` * @return ${info.returns}`);
 		}
@@ -527,20 +648,27 @@ export class ApexVirtualTypeService {
 		const info: {
 			description?: string;
 			paramSummary?: string;
+			paramDocs: Map<string, string>;
 			returns?: string;
-		} = {};
+		} = { paramDocs: new Map() };
 		let mode: "description" | "param" | "return" = "description";
+		let currentParamName: string | undefined;
 		for (const line of raw) {
 			const tagMatch = line.match(/^@(param|return)\s+(.*)$/);
 			if (tagMatch) {
 				mode = tagMatch[1] === "param" ? "param" : "return";
 				if (mode === "param") {
 					const paramMatch = tagMatch[2].match(/^(\w+)\s*-?\s*(.*)$/);
-					if (paramMatch && paramMatch[1] === "params") {
-						info.paramSummary = paramMatch[2].trim();
+					currentParamName = paramMatch?.[1];
+					const paramDescription = paramMatch?.[2].trim() ?? "";
+					if (currentParamName === "params") {
+						info.paramSummary = paramDescription;
+					} else if (currentParamName) {
+						info.paramDocs.set(currentParamName, paramDescription);
 					}
 				} else {
 					info.returns = tagMatch[2].trim();
+					currentParamName = undefined;
 				}
 				continue;
 			}
@@ -548,6 +676,15 @@ export class ApexVirtualTypeService {
 				info.description = info.description
 					? `${info.description} ${line}`
 					: line;
+			} else if (
+				mode === "param" &&
+				currentParamName &&
+				currentParamName !== "params"
+			) {
+				info.paramDocs.set(
+					currentParamName,
+					`${info.paramDocs.get(currentParamName) ?? ""} ${line}`.trim(),
+				);
 			} else if (mode === "return") {
 				info.returns = info.returns ? `${info.returns} ${line}`.trim() : line;
 			}
