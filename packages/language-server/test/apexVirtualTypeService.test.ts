@@ -3,6 +3,20 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ApexVirtualTypeService } from "../src/apex";
 
+type ApexPayload = {
+	workspace: string;
+	files: Array<{ moduleName: string; content: string }>;
+};
+
+function isApexPayload(value: unknown): value is ApexPayload {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"workspace" in value &&
+		"files" in value
+	);
+}
+
 async function waitFor<T>(fn: () => T | undefined, timeoutMs = 3000) {
 	const started = Date.now();
 	let value: T | undefined;
@@ -47,14 +61,16 @@ describe("ApexVirtualTypeService", () => {
 				"utf8",
 			);
 
-			const payloads: unknown[] = [];
+			const payloads: ApexPayload[] = [];
 			const service = new ApexVirtualTypeService(
 				{
 					sendNotification: () => undefined,
 				} as never,
 				workspace,
 				async (next) => {
-					payloads.push(next);
+					if (isApexPayload(next)) {
+						payloads.push(next);
+					}
 					return undefined;
 				},
 			);
@@ -65,28 +81,14 @@ describe("ApexVirtualTypeService", () => {
 				return payloads.length >= 2 ? true : undefined;
 			});
 
-			const latestPayload = payloads.at(-1) as
-				| {
-						workspace: string;
-						files: Array<{ moduleName: string; content: string }>;
-				  }
-				| undefined;
-			const firstPayload = payloads[0] as
-				| {
-						workspace: string;
-						files: Array<{ moduleName: string; content: string }>;
-				  }
-				| undefined;
+			const latestPayload = payloads.at(-1);
+			const firstPayload = payloads[0];
 			expect(firstPayload).toMatchObject({ workspace });
 			expect(firstPayload?.files[0]?.content).toContain("params: unknown");
 			expect(firstPayload?.files[0]?.content).toContain("Promise<unknown>");
 			expect(firstPayload?.files[0]?.content).toContain("@param params.query");
 			expect(latestPayload).toMatchObject({ workspace });
-			const files = (
-				latestPayload as {
-					files: Array<{ moduleName: string; content: string }>;
-				}
-			).files;
+			const files = latestPayload?.files ?? [];
 			expect(files).toHaveLength(1);
 			expect(files[0]?.moduleName).toBe(
 				"@salesforce/apex/ContactController.search",
@@ -124,17 +126,14 @@ describe("ApexVirtualTypeService", () => {
 				"utf8",
 			);
 
-			const payloads: Array<{
-				workspace: string;
-				files: Array<{ moduleName: string; content: string }>;
-			}> = [];
+			const payloads: ApexPayload[] = [];
 			const service = new ApexVirtualTypeService(
 				{
 					sendNotification: () => undefined,
 				} as never,
 				workspace,
 				async (next) => {
-					payloads.push(next as (typeof payloads)[number]);
+					payloads.push(next as ApexPayload);
 					return undefined;
 				},
 			);
@@ -169,6 +168,76 @@ describe("ApexVirtualTypeService", () => {
 			const latestPayload = payloads.at(-1);
 			expect(latestPayload?.files.map((file) => file.moduleName)).toContain(
 				"@salesforce/apex/ContactController.count",
+			);
+		} finally {
+			fs.rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("generates typings for multiple Apex classes", async () => {
+		const workspace = fs.mkdtempSync(
+			path.join(process.cwd(), "apex-workspace-"),
+		);
+		try {
+			const firstApexPath = path.join(
+				workspace,
+				"force-app",
+				"main",
+				"default",
+				"classes",
+				"ContactController.cls",
+			);
+			const secondApexPath = path.join(
+				workspace,
+				"force-app",
+				"main",
+				"default",
+				"classes",
+				"AccountController.cls",
+			);
+			fs.mkdirSync(path.dirname(firstApexPath), { recursive: true });
+			fs.writeFileSync(
+				firstApexPath,
+				`global class ContactController {
+				@AuraEnabled
+				public static List<Contact> search(String query) {
+					return new List<Contact>();
+				}
+			}`,
+				"utf8",
+			);
+			fs.writeFileSync(
+				secondApexPath,
+				`global class AccountController {
+				@AuraEnabled
+				public static Integer count() {
+					return 0;
+				}
+			}`,
+				"utf8",
+			);
+
+			const payloads: ApexPayload[] = [];
+			const service = new ApexVirtualTypeService(
+				{ sendNotification: () => undefined } as never,
+				workspace,
+				async (next) => {
+					if (isApexPayload(next)) {
+						payloads.push(next);
+					}
+					return undefined;
+				},
+			);
+
+			await service.initialize();
+			await waitFor(() => (payloads.length >= 2 ? true : undefined));
+
+			const latestPayload = payloads.at(-1);
+			expect(latestPayload?.files.map((file) => file.moduleName)).toEqual(
+				expect.arrayContaining([
+					"@salesforce/apex/ContactController.search",
+					"@salesforce/apex/AccountController.count",
+				]),
 			);
 		} finally {
 			fs.rmSync(workspace, { recursive: true, force: true });

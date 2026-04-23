@@ -96,6 +96,11 @@ export const startServer = () => {
 		void apexService?.handleWatchedFiles(params);
 	});
 
+	connection.onShutdown(() => {
+		apexService?.dispose();
+		apexService = undefined;
+	});
+
 	documents.onDidChangeContent((event) => {
 		console.log(
 			"[tatzeroko-language-server] document changed",
