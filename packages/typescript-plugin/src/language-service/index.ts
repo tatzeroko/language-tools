@@ -36,6 +36,14 @@ function isVirtualApexPath(normalizedPath: string) {
 	return normalizedPath.includes("/.tatzeroko/virtual/apex/");
 }
 
+function isSalesforceGeneratedApexTypings(normalizedPath: string) {
+	return normalizedPath.includes("/.sfdx/typings/lwc/apex/");
+}
+
+function shouldIgnoreApexTyping(normalizedPath: string) {
+	return isSalesforceGeneratedApexTypings(normalizedPath);
+}
+
 function synthesizeVirtualApexContent(normalizedPath: string) {
 	const fileName = path.basename(normalizedPath, ".d.ts");
 	const [, methodName] = fileName.split(".");
@@ -125,7 +133,10 @@ function decorateLanguageServiceHost(
 	};
 
 	host.getScriptFileNames = () => {
-		const scriptFileNames = orig.getScriptFileNames?.() ?? [];
+		const scriptFileNames = (orig.getScriptFileNames?.() ?? []).filter(
+			(fileName) =>
+				!shouldIgnoreApexTyping(typescript.server.toNormalizedPath(fileName)),
+		);
 		const virtualFiles = vfs.list();
 		if (virtualFiles.length) {
 			console.log(
@@ -137,6 +148,9 @@ function decorateLanguageServiceHost(
 
 	host.getScriptSnapshot = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
+		if (shouldIgnoreApexTyping(normalized)) {
+			return undefined;
+		}
 		const content = vfs.get(normalized)?.buffer.toString("utf8");
 		if (content !== undefined) {
 			console.log(
@@ -161,6 +175,9 @@ function decorateLanguageServiceHost(
 
 	host.readFile = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
+		if (shouldIgnoreApexTyping(normalized)) {
+			return undefined;
+		}
 		const content = vfs.get(normalized)?.buffer.toString("utf8");
 		if (content !== undefined) {
 			console.log(
@@ -173,6 +190,9 @@ function decorateLanguageServiceHost(
 
 	host.fileExists = (fileName: string) => {
 		const normalized = typescript.server.toNormalizedPath(fileName);
+		if (shouldIgnoreApexTyping(normalized)) {
+			return false;
+		}
 		const exists =
 			vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
 		if (isVirtualApexPath(normalized)) {
@@ -213,11 +233,16 @@ function decorateLanguageServiceHost(
 				include,
 				depth,
 			) ?? [];
+		const filteredBase = base.filter(
+			(file) =>
+				!shouldIgnoreApexTyping(typescript.server.toNormalizedPath(file)),
+		);
 		const normalizedDir = typescript.server.toNormalizedPath(directoryName);
 		const suffixes = new Set(extensions ?? []);
 		const virtualFiles = vfs
 			.list()
 			.filter((file) => file.startsWith(`${normalizedDir}/`))
+			.filter((file) => !shouldIgnoreApexTyping(file))
 			.filter((file) => {
 				if (!suffixes.size) {
 					return true;
@@ -229,7 +254,7 @@ function decorateLanguageServiceHost(
 				`[tatzeroko-plugin] readDirectory path=${normalizedDir} base=${base.length} virtual=${virtualFiles.length} extensions=${Array.from(suffixes).join(",")}`,
 			);
 		}
-		return Array.from(new Set([...base, ...virtualFiles]));
+		return Array.from(new Set([...filteredBase, ...virtualFiles]));
 	};
 
 	host.resolveModuleNameLiterals = (
