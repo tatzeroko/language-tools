@@ -219,4 +219,88 @@ describe("language-service decorator", () => {
 			fs.rmSync(workspace, { recursive: true, force: true });
 		}
 	});
+
+	it("ignores Salesforce-generated Apex typings from .sfdx", () => {
+		const workspace = fs.mkdtempSync(path.join(process.cwd(), "sf-plugin-"));
+		try {
+			const ignoredPath = path.join(
+				workspace,
+				".sfdx",
+				"typings",
+				"lwc",
+				"apex",
+				"ContactController.d.ts",
+			);
+			const ignoredNormalized = typescript.server.toNormalizedPath(ignoredPath);
+
+			const vfs = new VirtualFileStore();
+			const host: ts.LanguageServiceHost = {
+				getScriptFileNames: () => [ignoredPath],
+				getScriptVersion: () => "1",
+				getScriptSnapshot: (fileName) => {
+					const normalizedName = typescript.server.toNormalizedPath(fileName);
+					if (normalizedName === ignoredNormalized) {
+						return typescript.ScriptSnapshot.fromString(
+							'declare module "@salesforce/apex/Foo.bar" { export default function bar(param: { value: any }): Promise<any>; }',
+						);
+					}
+					return undefined;
+				},
+				getCurrentDirectory: () => workspace,
+				getCompilationSettings: () => ({
+					module: typescript.ModuleKind.ESNext,
+					moduleResolution: typescript.ModuleResolutionKind.NodeNext,
+				}),
+				getDefaultLibFileName: (options) =>
+					typescript.getDefaultLibFilePath(options),
+				readFile: (fileName) => {
+					const normalizedName = typescript.server.toNormalizedPath(fileName);
+					return normalizedName === ignoredNormalized
+						? 'declare module "@salesforce/apex/Foo.bar" { export default function bar(param: { value: any }): Promise<any>; }'
+						: undefined;
+				},
+				fileExists: (fileName) => {
+					const normalizedName = typescript.server.toNormalizedPath(fileName);
+					return normalizedName === ignoredNormalized;
+				},
+				directoryExists: (directoryName) => {
+					const normalizedDir =
+						typescript.server.toNormalizedPath(directoryName);
+					return normalizedDir.endsWith("/.sfdx/typings/lwc");
+				},
+				readDirectory: (directoryName) => {
+					const normalizedDir =
+						typescript.server.toNormalizedPath(directoryName);
+					return normalizedDir.endsWith("/.sfdx/typings/lwc")
+						? [ignoredPath]
+						: [];
+				},
+				getDirectories: () => [],
+			};
+			const ls = typescript.createLanguageService(host);
+			decorateLanguageService(
+				workspace,
+				typescript,
+				host,
+				ls,
+				vfs,
+				{
+					getOrCreateScriptInfoForNormalizedPath: () => undefined,
+				} as never,
+				{
+					addRoot: () => undefined,
+				} as never,
+				() => ls.dispose(),
+			);
+
+			expect(host.getScriptFileNames()).not.toContain(ignoredPath);
+			expect(host.fileExists?.(ignoredPath)).toBe(false);
+			expect(host.readFile?.(ignoredPath)).toBeUndefined();
+			expect(
+				host.readDirectory?.(path.join(workspace, ".sfdx", "typings", "lwc")),
+			).not.toContain(ignoredPath);
+		} finally {
+			fs.rmSync(workspace, { recursive: true, force: true });
+		}
+	});
 });
