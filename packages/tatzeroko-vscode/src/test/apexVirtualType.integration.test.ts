@@ -5,7 +5,15 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 const fixtureRoot = path.resolve(process.cwd(), "test-fixtures/apex-workspace");
-const documentPath = path.join(fixtureRoot, "src", "index.ts");
+const documentPath = path.join(
+	fixtureRoot,
+	"force-app",
+	"main",
+	"default",
+	"lwc",
+	"contactViewer",
+	"contactViewer.js",
+);
 const documentUri = vscode.Uri.file(documentPath);
 
 async function activateExtension() {
