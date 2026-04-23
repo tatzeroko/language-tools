@@ -8,6 +8,7 @@ import type {
 	DidChangeWatchedFilesParams,
 } from "vscode-languageserver/node";
 
+import { renderApexDocBlock } from "./apex-doc";
 import { generateApexVirtualFiles } from "./apex-generator";
 import { ApexWorkerClient } from "./apex-worker-client";
 
@@ -57,6 +58,7 @@ export class ApexVirtualTypeService {
 	private workerClient?: ApexWorkerClient;
 	private workspaceWatchers: fsSync.FSWatcher[] = [];
 	private workspaceRefreshTimer?: ReturnType<typeof setTimeout>;
+	private disposed = false;
 	private workspaceWatcherMode: "recursive" | "directories" | "none" = "none";
 	private generationTimer?: ReturnType<typeof setTimeout>;
 	private generationTicket = 0;
@@ -71,11 +73,29 @@ export class ApexVirtualTypeService {
 	) {}
 
 	async initialize() {
+		if (this.disposed) {
+			return;
+		}
 		console.log("[tatzeroko-language-server] apex service initialize");
 		this.log(`apex service initialize workspace=${this.workspaceRoot}`);
 		this.workerClient = new ApexWorkerClient(this.workspaceRoot);
 		await this.startWorkspaceWatcher();
 		void this.refreshFromWorkspace();
+	}
+
+	dispose() {
+		this.disposed = true;
+		if (this.workspaceRefreshTimer) {
+			clearTimeout(this.workspaceRefreshTimer);
+			this.workspaceRefreshTimer = undefined;
+		}
+		if (this.generationTimer) {
+			clearTimeout(this.generationTimer);
+			this.generationTimer = undefined;
+		}
+		this.closeWorkspaceWatchers();
+		this.workerClient?.dispose();
+		this.workerClient = undefined;
 	}
 
 	async handleWatchedFiles(params: DidChangeWatchedFilesParams) {
@@ -123,6 +143,9 @@ export class ApexVirtualTypeService {
 	}
 
 	private async refreshFromWorkspace() {
+		if (this.disposed) {
+			return;
+		}
 		const revision = this.workspaceRevision;
 		this.log(
 			`refreshFromWorkspace start revision=${revision} workspace=${this.workspaceRoot}`,
@@ -158,6 +181,9 @@ export class ApexVirtualTypeService {
 	}
 
 	private async startWorkspaceWatcher() {
+		if (this.disposed) {
+			return;
+		}
 		if (this.workspaceWatchers.length || this.workspaceWatcherMode !== "none") {
 			return;
 		}
@@ -190,6 +216,9 @@ export class ApexVirtualTypeService {
 	}
 
 	private async refreshDirectoryWatchers() {
+		if (this.disposed) {
+			return;
+		}
 		this.closeWorkspaceWatchers();
 		this.log(
 			`workspace watcher refreshing directories root=${this.workspaceRoot}`,
@@ -229,6 +258,9 @@ export class ApexVirtualTypeService {
 	}
 
 	private scheduleWorkspaceRefresh() {
+		if (this.disposed) {
+			return;
+		}
 		if (this.workspaceRefreshTimer) {
 			clearTimeout(this.workspaceRefreshTimer);
 		}
@@ -268,6 +300,9 @@ export class ApexVirtualTypeService {
 	}
 
 	private async scheduleGeneration() {
+		if (this.disposed) {
+			return;
+		}
 		const ticket = ++this.generationTicket;
 		this.log(
 			`scheduleGeneration ticket=${ticket} revision=${this.workspaceRevision}`,
@@ -283,6 +318,9 @@ export class ApexVirtualTypeService {
 	}
 
 	private async generateDefinitions(ticket: number) {
+		if (this.disposed) {
+			return;
+		}
 		const workerClient = this.workerClient;
 		if (!workerClient) {
 			this.log(`generateDefinitions skipped ticket=${ticket} reason=no-worker`);
@@ -355,43 +393,6 @@ export class ApexVirtualTypeService {
 		this.log(
 			`generateDefinitions publishing files=${payload.files.length} workspace=${payload.workspace}`,
 		);
-		await this.publishDefinitions(payload);
-	}
-
-	private async generateDefinitionsLegacy() {
-		const nextDefinitions = new Map<string, ApexVirtualFile>();
-
-		for (const [filePath, content] of this.apexSources) {
-			void filePath;
-			for (const apexClass of this.parseApexFile(content)) {
-				for (const method of apexClass.methods) {
-					const moduleName = `@salesforce/apex/${apexClass.name}.${method.name}`;
-					const virtualPath = this.getVirtualFilePath(
-						apexClass.name,
-						method.name,
-					);
-					nextDefinitions.set(virtualPath, {
-						path: virtualPath,
-						content: this.renderModule(apexClass.name, method),
-						moduleName,
-					});
-				}
-			}
-		}
-
-		if (this.definitionsAreEqual(this.definitions, nextDefinitions)) {
-			return;
-		}
-
-		this.definitions.clear();
-		for (const [filePath, definition] of nextDefinitions) {
-			this.definitions.set(filePath, definition);
-		}
-
-		const payload: ApexTypesPayload = {
-			workspace: this.workspaceRoot,
-			files: Array.from(this.definitions.values()),
-		};
 		await this.publishDefinitions(payload);
 	}
 
@@ -589,7 +590,7 @@ export class ApexVirtualTypeService {
 	}
 
 	private renderModule(className: string, method: ApexMethod) {
-		const docBlock = this.buildDocBlock(method.docComment);
+		const docBlock = renderApexDocBlock(method.docComment);
 		const returnType = this.mapApexType(method.returnType);
 		const paramsType = !method.params.length
 			? "Record<string, unknown>"
@@ -601,95 +602,6 @@ export class ApexVirtualTypeService {
 			`renderModule class=${className} method=${method.name} renderedLength=${rendered.length}`,
 		);
 		return rendered;
-	}
-
-	private buildParamType(typeName: string, params: ApexMethod["params"]) {
-		if (!params.length) {
-			return `type ${typeName} = Record<string, unknown>;\n\n`;
-		}
-		const fields = params
-			.map((param) => `\t${param.name}: ${this.mapApexType(param.type)};`)
-			.join("\n");
-		return `type ${typeName} = {\n${fields}\n};\n\n`;
-	}
-
-	private buildDocBlock(docComment?: string) {
-		if (!docComment) {
-			return "";
-		}
-		const info = this.parseDocComment(docComment);
-		const lines = ["/**"];
-		if (info.description) {
-			for (const line of info.description.split(/\n+/)) {
-				lines.push(` * ${line}`);
-			}
-		}
-		lines.push(
-			` * @param params - ${info.paramSummary ?? "The parameters for this call."}`,
-		);
-		for (const [name, description] of info.paramDocs) {
-			lines.push(` * @param params.${name} - ${description}`);
-		}
-		if (info.returns) {
-			lines.push(` * @return ${info.returns}`);
-		}
-		lines.push(" */\n");
-		return `${lines.join("\n")}`;
-	}
-
-	private parseDocComment(comment: string) {
-		this.log(`parseDocComment length=${comment.length}`);
-		const raw = comment
-			.replace(/^\/\*\*/, "")
-			.replace(/\*\/$/, "")
-			.split(/\r?\n/)
-			.map((line) => line.replace(/^\s*\*\s?/, "").trim())
-			.filter(Boolean);
-		const info: {
-			description?: string;
-			paramSummary?: string;
-			paramDocs: Map<string, string>;
-			returns?: string;
-		} = { paramDocs: new Map() };
-		let mode: "description" | "param" | "return" = "description";
-		let currentParamName: string | undefined;
-		for (const line of raw) {
-			const tagMatch = line.match(/^@(param|return)\s+(.*)$/);
-			if (tagMatch) {
-				mode = tagMatch[1] === "param" ? "param" : "return";
-				if (mode === "param") {
-					const paramMatch = tagMatch[2].match(/^(\w+)\s*-?\s*(.*)$/);
-					currentParamName = paramMatch?.[1];
-					const paramDescription = paramMatch?.[2].trim() ?? "";
-					if (currentParamName === "params") {
-						info.paramSummary = paramDescription;
-					} else if (currentParamName) {
-						info.paramDocs.set(currentParamName, paramDescription);
-					}
-				} else {
-					info.returns = tagMatch[2].trim();
-					currentParamName = undefined;
-				}
-				continue;
-			}
-			if (mode === "description") {
-				info.description = info.description
-					? `${info.description} ${line}`
-					: line;
-			} else if (
-				mode === "param" &&
-				currentParamName &&
-				currentParamName !== "params"
-			) {
-				info.paramDocs.set(
-					currentParamName,
-					`${info.paramDocs.get(currentParamName) ?? ""} ${line}`.trim(),
-				);
-			} else if (mode === "return") {
-				info.returns = info.returns ? `${info.returns} ${line}`.trim() : line;
-			}
-		}
-		return info;
 	}
 
 	private mapApexType(type: string): string {
@@ -727,15 +639,6 @@ export class ApexVirtualTypeService {
 			"apex",
 			`${className}.${methodName}.d.ts`,
 		);
-	}
-
-	private sanitizeIdentifier(value: string) {
-		return value.replace(/[^A-Za-z0-9_]/g, "");
-	}
-
-	private capitalize(value: string) {
-		if (!value) return "";
-		return value.charAt(0).toUpperCase() + value.slice(1);
 	}
 
 	private uriToPath(uri: string) {
