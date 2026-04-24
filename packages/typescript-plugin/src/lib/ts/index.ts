@@ -1,11 +1,11 @@
 import type ts from "typescript/lib/tsserverlibrary";
 
 /**
- * Determines whether a Javascript/TypeScript project has an equivalent counterpart
+ * Determines whether a JavaScript/TypeScript project has an equivalent counterpart.
  *
  * @param typescript The TypeScript module reference provided by the plugin.
  * @param path The path to the jsconfig.json or tsconfig.json file.
- * @return `true` if an equivalent counterpart project file exists; otherwise `false`.
+ * @returns `true` if an equivalent counterpart project file exists; otherwise `false`.
  */
 export function hasEquivalentProjectCounterpart(
 	typescript: typeof ts,

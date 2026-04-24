@@ -1,4 +1,3 @@
-import type * as ts from "typescript/lib/tsserverlibrary";
 import * as typescript from "typescript/lib/tsserverlibrary";
 import { describe, expect, it, vi } from "vitest";
 import { loadFile } from "../src/lib/ts/file";
@@ -22,7 +21,7 @@ describe("plugin external files", () => {
 		const getOrCreateScriptInfoForNormalizedPath = vi.fn(() => ({
 			path: normalizedPath,
 		}));
-		const project = {
+		const project: Parameters<typeof loadFile>[1] = {
 			containsFile: () => true,
 			readFile,
 			projectService: {
@@ -30,7 +29,7 @@ describe("plugin external files", () => {
 				openFiles: new Map<string, undefined>(),
 			},
 			addRoot,
-		} as never as ts.server.Project;
+		};
 
 		loadFile(typescript, project, normalizedPath);
 
@@ -58,7 +57,7 @@ describe("plugin external files", () => {
 			getSnapshot,
 			editContent,
 		}));
-		const project = {
+		const project: Parameters<typeof loadFile>[1] = {
 			containsFile: () => true,
 			readFile: vi.fn(),
 			projectService: {
@@ -66,7 +65,7 @@ describe("plugin external files", () => {
 				openFiles: new Map<string, undefined>(),
 			},
 			addRoot,
-		} as never as ts.server.Project;
+		};
 
 		loadFile(
 			typescript,

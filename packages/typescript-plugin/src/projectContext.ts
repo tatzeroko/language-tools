@@ -84,20 +84,26 @@ export default class ProjectContext {
 	}
 
 	/**
-	 * Retrieves all contexts within a given Salesforce workspace.
+	 * Runs a callback for each context whose workspace matches the given workspace prefix.
 	 *
 	 * @param workspace The Salesforce workspace root path.
 	 */
-	static getAllInWorkspace(workspace: string) {
-		const ws = ProjectContext.workspaces.get(workspace);
-		return ws ? Array.from(ws.values()) : [];
-	}
-
-	/**
-	 * Retrieves the global registry of all workspaces.
-	 */
-	static getAllWorkspaces() {
-		return ProjectContext.workspaces;
+	static forEachMatchingWorkspace(
+		workspace: string,
+		callback: (workspace: string, ctx: ProjectContext) => void,
+	) {
+		for (const [ctxWorkspace, ws] of ProjectContext.workspaces) {
+			if (
+				workspace !== ctxWorkspace &&
+				!workspace.startsWith(`${ctxWorkspace}/`) &&
+				!ctxWorkspace.startsWith(`${workspace}/`)
+			) {
+				continue;
+			}
+			for (const ctx of ws.values()) {
+				callback(ctxWorkspace, ctx);
+			}
+		}
 	}
 
 	/**

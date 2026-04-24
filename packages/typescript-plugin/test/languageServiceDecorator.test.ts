@@ -78,12 +78,8 @@ describe("language-service decorator", () => {
 				host,
 				ls,
 				vfs,
-				{
-					getOrCreateScriptInfoForNormalizedPath: () => undefined,
-				} as never,
-				{
-					addRoot: () => undefined,
-				} as never,
+				{ getOrCreateScriptInfoForNormalizedPath: () => undefined },
+				{ addRoot: () => undefined },
 				() => ls.dispose(),
 				(moduleName) =>
 					moduleName === "@salesforce/apex/ContactController.search"
@@ -163,12 +159,8 @@ describe("language-service decorator", () => {
 				host,
 				ls,
 				vfs,
-				{
-					getOrCreateScriptInfoForNormalizedPath: () => undefined,
-				} as never,
-				{
-					addRoot: () => undefined,
-				} as never,
+				{ getOrCreateScriptInfoForNormalizedPath: () => undefined },
+				{ addRoot: () => undefined },
 				() => ls.dispose(),
 				(moduleName) =>
 					moduleName === "@salesforce/apex/ContactController.search"
@@ -188,7 +180,7 @@ describe("language-service decorator", () => {
 			expect(diagnostics).toHaveLength(0);
 			const moduleLiteral = {
 				text: "@salesforce/apex/ContactController.search",
-			} as ts.StringLiteralLike;
+			} satisfies ts.StringLiteralLike;
 			const sourceFile = typescript.createSourceFile(
 				consumerPath,
 				consumerText,
@@ -284,12 +276,8 @@ describe("language-service decorator", () => {
 				host,
 				ls,
 				vfs,
-				{
-					getOrCreateScriptInfoForNormalizedPath: () => undefined,
-				} as never,
-				{
-					addRoot: () => undefined,
-				} as never,
+				{ getOrCreateScriptInfoForNormalizedPath: () => undefined },
+				{ addRoot: () => undefined },
 				() => ls.dispose(),
 			);
 

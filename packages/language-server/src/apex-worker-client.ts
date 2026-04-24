@@ -17,6 +17,7 @@ type GenerateResponse = {
 	error?: string;
 };
 
+/** Runs Apex generation in a worker when available. */
 export class ApexWorkerClient {
 	private worker?: Worker;
 	private readonly pending = new Map<
@@ -33,21 +34,13 @@ export class ApexWorkerClient {
 	async generate(
 		sources: ReadonlyArray<readonly [string, string]>,
 	): Promise<ReadonlyArray<ApexVirtualFile>> {
-		console.log(
-			`[tatzeroko-language-server] apex worker generate sources=${sources.length} workspace=${this.workspaceRoot}`,
-		);
 		if (!this.hasWorkerScript()) {
-			console.log("[tatzeroko-language-server] apex worker fallback=direct");
 			return generateApexVirtualFiles(this.workspaceRoot, sources);
 		}
 		const worker = this.ensureWorker();
-		console.log("[tatzeroko-language-server] apex worker fallback=worker");
 		return await new Promise<ReadonlyArray<ApexVirtualFile>>(
 			(resolve, reject) => {
 				const requestId = ++this.requestSeq;
-				console.log(
-					`[tatzeroko-language-server] apex worker request id=${requestId} sources=${sources.length}`,
-				);
 				this.pending.set(requestId, { resolve, reject });
 				const message: GenerateRequest = {
 					kind: "generate",
@@ -60,7 +53,6 @@ export class ApexWorkerClient {
 	}
 
 	dispose() {
-		console.log("[tatzeroko-language-server] apex worker dispose");
 		this.worker?.terminate();
 		this.worker = undefined;
 		for (const { reject } of this.pending.values()) {
@@ -71,21 +63,13 @@ export class ApexWorkerClient {
 
 	private ensureWorker() {
 		if (this.worker) {
-			console.log("[tatzeroko-language-server] apex worker reuse");
 			return this.worker;
 		}
 
-		console.log(
-			"[tatzeroko-language-server] apex worker create",
-			this.workspaceRoot,
-		);
 		this.worker = new Worker(path.join(__dirname, "apex-generator.worker.js"), {
 			workerData: { workspaceRoot: this.workspaceRoot },
 		});
 		this.worker.on("message", (message: GenerateResponse) => {
-			console.log(
-				`[tatzeroko-language-server] apex worker message requestId=${message.requestId} files=${message.files?.length ?? 0} error=${message.error ?? "none"}`,
-			);
 			const pending = this.pending.get(message.requestId);
 			if (!pending) return;
 			this.pending.delete(message.requestId);
@@ -96,7 +80,6 @@ export class ApexWorkerClient {
 			pending.resolve(message.files ?? []);
 		});
 		this.worker.on("error", (error) => {
-			console.log("[tatzeroko-language-server] apex worker error", error);
 			for (const { reject } of this.pending.values()) {
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
@@ -104,7 +87,6 @@ export class ApexWorkerClient {
 			this.worker = undefined;
 		});
 		this.worker.on("exit", () => {
-			console.log("[tatzeroko-language-server] apex worker exit");
 			this.worker = undefined;
 		});
 		return this.worker;
@@ -113,9 +95,6 @@ export class ApexWorkerClient {
 	private hasWorkerScript() {
 		const exists = fs.existsSync(
 			path.join(__dirname, "apex-generator.worker.js"),
-		);
-		console.log(
-			`[tatzeroko-language-server] apex worker script exists=${exists}`,
 		);
 		return exists;
 	}

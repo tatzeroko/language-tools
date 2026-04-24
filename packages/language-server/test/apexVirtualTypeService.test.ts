@@ -63,9 +63,7 @@ describe("ApexVirtualTypeService", () => {
 
 			const payloads: ApexPayload[] = [];
 			const service = new ApexVirtualTypeService(
-				{
-					sendNotification: () => undefined,
-				} as never,
+				{ sendNotification: () => undefined },
 				workspace,
 				async (next) => {
 					if (isApexPayload(next)) {
@@ -128,12 +126,12 @@ describe("ApexVirtualTypeService", () => {
 
 			const payloads: ApexPayload[] = [];
 			const service = new ApexVirtualTypeService(
-				{
-					sendNotification: () => undefined,
-				} as never,
+				{ sendNotification: () => undefined },
 				workspace,
 				async (next) => {
-					payloads.push(next as ApexPayload);
+					if (isApexPayload(next)) {
+						payloads.push(next);
+					}
 					return undefined;
 				},
 			);
@@ -219,7 +217,7 @@ describe("ApexVirtualTypeService", () => {
 
 			const payloads: ApexPayload[] = [];
 			const service = new ApexVirtualTypeService(
-				{ sendNotification: () => undefined } as never,
+				{ sendNotification: () => undefined },
 				workspace,
 				async (next) => {
 					if (isApexPayload(next)) {
@@ -264,9 +262,7 @@ describe("ApexVirtualTypeService", () => {
 
 			const notifications: unknown[] = [];
 			const service = new ApexVirtualTypeService(
-				{
-					sendNotification: () => undefined,
-				} as never,
+				{ sendNotification: () => undefined },
 				workspace,
 				async (next) => {
 					notifications.push(next);

@@ -7,7 +7,7 @@ import { loadFile, unloadFile } from "./lib/ts/file";
 import ProjectContext from "./projectContext";
 import { VirtualFileStore } from "./vfs";
 
-type ApexPayloadFile = {
+type ApexDefinitionFile = {
 	readonly path: string;
 	readonly content: string;
 	readonly moduleName: string;
@@ -15,39 +15,43 @@ type ApexPayloadFile = {
 
 type ApexUpdateRequest = {
 	readonly workspace?: string;
-	readonly files?: ReadonlyArray<ApexPayloadFile>;
+	readonly files?: ReadonlyArray<ApexDefinitionFile>;
 };
 
-function getRequestPayload<T>(
-	request: ts.server.protocol.Request,
-): T | undefined {
+function getRequestPayload(request: ts.server.protocol.Request): unknown {
 	const candidate = Array.isArray(request.arguments)
 		? request.arguments[0]
 		: request.arguments;
-	return candidate as T | undefined;
+	return candidate;
+}
+
+function getProjectRootPath(project: ts.server.Project) {
+	const candidate = project as { projectRootPath?: unknown };
+	return typeof candidate.projectRootPath === "string"
+		? candidate.projectRootPath
+		: null;
+}
+
+function isApexUpdateRequest(value: unknown): value is ApexUpdateRequest {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as ApexUpdateRequest;
+	return (
+		(candidate.workspace === undefined ||
+			typeof candidate.workspace === "string") &&
+		(candidate.files === undefined || Array.isArray(candidate.files))
+	);
 }
 
 function init(modules: { typescript: typeof ts }) {
 	const { typescript } = modules;
 
-	const sessionWithHandlers = new WeakSet<ts.server.Session>();
-	const workspaceApexDefinitions = new Map<
+	const handledSessions = new WeakSet<ts.server.Session>();
+	const apexDefinitionsByWorkspace = new Map<
 		string,
-		ReadonlyArray<ApexPayloadFile>
+		ReadonlyArray<ApexDefinitionFile>
 	>();
 
 	function create(info: ts.server.PluginCreateInfo) {
-		console.log(
-			"[tatzeroko-plugin] create",
-			info.project.getCurrentDirectory(),
-		);
-		console.log(
-			`[tatzeroko-plugin] create project=${info.project.getProjectName()} cwd=${info.project.getCurrentDirectory()}`,
-		);
-		info.project.projectService.logger.info(
-			`tatzeroko: create plugin for ${info.project.getCurrentDirectory()}`,
-		);
-
 		const rawWorkspace = findSalesforceWorkspaceRoot(
 			typescript,
 			info.project.getCurrentDirectory(),
@@ -56,20 +60,16 @@ function init(modules: { typescript: typeof ts }) {
 			return info.languageService;
 		}
 		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
-		console.log(`[tatzeroko-plugin] create workspace=${workspace}`);
 
 		const projectName = info.project.getProjectName();
 		if (
 			projectName.endsWith("jsconfig.json") &&
 			hasEquivalentProjectCounterpart(typescript, projectName)
 		) {
-			console.log(
-				`[tatzeroko-plugin] create skipped jsconfig counterpart project=${projectName}`,
-			);
 			return info.languageService;
 		}
 
-		setupSessionHandlers(info.session, info.project.projectService.logger);
+		setupSessionHandlers(info.session);
 
 		const existingContext = ProjectContext.get(workspace, info.project);
 		const context =
@@ -81,12 +81,6 @@ function init(modules: { typescript: typeof ts }) {
 				new VirtualFileStore(),
 			);
 		if (existingContext) {
-			console.log(
-				`[tatzeroko-plugin] create reusing context workspace=${workspace}`,
-			);
-			info.project.projectService.logger.info(
-				`tatzeroko: reusing plugin context for ${workspace}`,
-			);
 			return decorateLanguageService(
 				workspace,
 				typescript,
@@ -100,9 +94,6 @@ function init(modules: { typescript: typeof ts }) {
 			);
 		}
 
-		info.project.projectService.logger.info(
-			`tatzeroko: created plugin context for ${workspace}`,
-		);
 		applyWorkspaceApexFiles(workspace);
 
 		return decorateLanguageService(
@@ -118,12 +109,9 @@ function init(modules: { typescript: typeof ts }) {
 		);
 	}
 
-	function setupSessionHandlers(
-		session: ts.server.Session | undefined,
-		logger: ts.server.Logger,
-	) {
-		if (!session || sessionWithHandlers.has(session)) return;
-		sessionWithHandlers.add(session);
+	function setupSessionHandlers(session: ts.server.Session | undefined) {
+		if (!session || handledSessions.has(session)) return;
+		handledSessions.add(session);
 
 		const registerHandler = (
 			command: string,
@@ -133,43 +121,33 @@ function init(modules: { typescript: typeof ts }) {
 		) => {
 			try {
 				session.addProtocolHandler(command, handler);
-			} catch (error) {
-				logger.info(
-					`tatzeroko: typescript-plugin skip duplicate ${command} handler ${error}`,
-				);
+			} catch {
+				return;
 			}
 		};
 
 		registerHandler("_tatzeroko/updateApexTypes", (request) => {
-			const payload = getRequestPayload<ApexUpdateRequest>(request);
-			if (!payload?.workspace || !Array.isArray(payload.files)) {
-				logger.info("tatzeroko: updateApexTypes rejected invalid payload");
+			const payload = getRequestPayload(request);
+			if (
+				!isApexUpdateRequest(payload) ||
+				!payload.workspace ||
+				!payload.files
+			) {
 				return { response: { success: false } };
 			}
 
 			const normalizedWorkspace = typescript.server.toNormalizedPath(
 				payload.workspace,
 			);
-			logger.info(
-				`tatzeroko: updateApexTypes workspace=${normalizedWorkspace} files=${payload.files.length}`,
-			);
 			const files = payload.files.filter(
-				(file): file is ApexPayloadFile =>
+				(file): file is ApexDefinitionFile =>
 					!!file &&
 					typeof file.path === "string" &&
 					typeof file.content === "string" &&
 					typeof file.moduleName === "string",
 			);
-			for (const file of files) {
-				logger.info(
-					`tatzeroko: updateApexTypes file path=${file.path} module=${file.moduleName} length=${file.content.length}`,
-				);
-			}
-			workspaceApexDefinitions.set(normalizedWorkspace, files);
+			apexDefinitionsByWorkspace.set(normalizedWorkspace, files);
 			applyWorkspaceApexFiles(normalizedWorkspace);
-			logger.info(
-				`tatzeroko: updateApexTypes applied workspace=${normalizedWorkspace}`,
-			);
 			return {
 				response: buildApexStateSnapshot(normalizedWorkspace),
 				responseRequired: true,
@@ -177,100 +155,27 @@ function init(modules: { typescript: typeof ts }) {
 		});
 	}
 
-	function seedFilesInProjectService(
-		session: ts.server.Session | undefined,
-		workspace: string,
-		files: ReadonlyArray<ApexPayloadFile>,
-	) {
-		const projectService = (
-			session as unknown as { projectService?: ts.server.ProjectService }
-		)?.projectService;
-		if (!projectService) {
-			console.log(
-				`[tatzeroko-plugin] seedFilesInProjectService skipped workspace=${workspace} reason=no-project-service`,
-			);
-			return;
-		}
-
-		for (const file of files) {
-			const normalizedPath = typescript.server.toNormalizedPath(file.path);
-			try {
-				projectService.openClientFileWithNormalizedPath(
-					normalizedPath,
-					file.content,
-					typescript.ScriptKind.TS,
-					false,
-					typescript.server.toNormalizedPath(workspace),
-				);
-				console.log(
-					`[tatzeroko-plugin] seedFilesInProjectService opened path=${normalizedPath} workspace=${workspace}`,
-				);
-			} catch (error) {
-				console.log(
-					`[tatzeroko-plugin] seedFilesInProjectService failed path=${normalizedPath} error=${String(error)}`,
-				);
-			}
-		}
-	}
-
 	function applyWorkspaceApexFiles(workspace: string) {
-		const definitions = workspaceApexDefinitions.get(workspace) ?? [];
-		console.log(
-			`[tatzeroko-plugin] applyWorkspaceApexFiles workspace=${workspace} count=${definitions.length}`,
-		);
-		for (const ctx of getContextsForWorkspace(workspace)) {
-			console.log(
-				`[tatzeroko-plugin] applyWorkspaceApexFiles context workspace=${workspace} project=${ctx.project.getCurrentDirectory()} existing=${ctx.vfs.list().length}`,
-			);
-			const nextPaths = new Set(
-				definitions.map((definition) => definition.path),
-			);
-			for (const existingPath of ctx.vfs.list()) {
+		const definitions = apexDefinitionsByWorkspace.get(workspace) ?? [];
+		const nextPaths = new Set(definitions.map((definition) => definition.path));
+		ProjectContext.forEachMatchingWorkspace(workspace, (_, ctx) => {
+			const currentFiles = ctx.vfs.list();
+			for (const existingPath of currentFiles) {
 				if (!nextPaths.has(existingPath)) {
 					unloadFile(typescript, ctx.project, existingPath);
 					ctx.vfs.delete(existingPath);
 				}
 			}
 			for (const definition of definitions) {
-				console.log(
-					`[tatzeroko-plugin] applyWorkspaceApexFiles definition path=${definition.path} module=${definition.moduleName} length=${definition.content.length}`,
-				);
 				ctx.vfs.set(definition.path, definition.content);
-				console.log(
-					`[tatzeroko-plugin] applyWorkspaceApexFiles vfsSize=${ctx.vfs.list().length}`,
-				);
 				loadFile(typescript, ctx.project, definition.path, definition.content);
 			}
 			ctx.project.updateGraph();
-		}
-		console.log(
-			`[tatzeroko-plugin] applyWorkspaceApexFiles done workspace=${workspace}`,
-		);
-	}
-
-	function getContextsForWorkspace(workspace: string) {
-		const contexts: ProjectContext[] = [];
-		for (const [ctxWorkspace, map] of ProjectContext.getAllWorkspaces()) {
-			if (isWorkspaceMatch(workspace, ctxWorkspace)) {
-				contexts.push(...map.values());
-			}
-		}
-		return contexts;
-	}
-
-	function isWorkspaceMatch(workspace: string, ctxWorkspace: string) {
-		return (
-			workspace === ctxWorkspace ||
-			workspace.startsWith(`${ctxWorkspace}/`) ||
-			ctxWorkspace.startsWith(`${workspace}/`)
-		);
+		});
 	}
 
 	function resolveApexModulePath(workspace: string, moduleName: string) {
 		if (!moduleName.startsWith("@salesforce/apex/")) {
-			console.log(
-				`[tatzeroko-plugin] resolveApexModulePath ignored module=${moduleName}`,
-			);
 			return undefined;
 		}
 		const resolved = typescript.server.toNormalizedPath(
@@ -282,36 +187,32 @@ function init(modules: { typescript: typeof ts }) {
 				`${moduleName.slice("@salesforce/apex/".length)}.d.ts`,
 			),
 		);
-		console.log(
-			`[tatzeroko-plugin] resolveApexModulePath module=${moduleName} resolved=${resolved}`,
-		);
 		return resolved;
 	}
 
 	function buildApexStateSnapshot(workspace?: string) {
-		const workspaces = workspace
-			? [workspace]
-			: Array.from(workspaceApexDefinitions.keys());
-		return {
-			success: true,
-			workspace: workspace ?? null,
-			definitions: Array.from(workspaceApexDefinitions.entries()).map(
-				([ws, files]) => ({
-					workspace: ws,
-					count: files.length,
-					paths: files.map((file) => file.path),
-				}),
-			),
-			contexts: workspaces.flatMap((ws) =>
-				getContextsForWorkspace(ws).map((ctx) => ({
+		const contexts: Array<{
+			workspace: string;
+			project: string;
+			projectRootPath: string | null;
+			vfs: string[];
+			openFiles: string[];
+			contains: Array<{
+				path: string;
+				containsFile: boolean;
+				scriptInfo: boolean;
+			}>;
+		}> = [];
+		const visitWorkspace = (ws: string) => {
+			ProjectContext.forEachMatchingWorkspace(ws, (_, ctx) => {
+				const vfsFiles = ctx.vfs.list();
+				contexts.push({
 					workspace: ws,
 					project: ctx.project.getCurrentDirectory(),
-					projectRootPath:
-						(ctx.project as { projectRootPath?: string }).projectRootPath ??
-						null,
-					vfs: ctx.vfs.list(),
+					projectRootPath: getProjectRootPath(ctx.project),
+					vfs: vfsFiles,
 					openFiles: Array.from(ctx.project.projectService.openFiles.keys()),
-					contains: Array.from(ctx.vfs.list()).map((file) => {
+					contains: vfsFiles.map((file) => {
 						const normalizedFile = typescript.server.toNormalizedPath(file);
 						return {
 							path: normalizedFile,
@@ -320,21 +221,33 @@ function init(modules: { typescript: typeof ts }) {
 								!!ctx.project.projectService.getScriptInfo(normalizedFile),
 						};
 					}),
-				})),
+				});
+			});
+		};
+		if (workspace) {
+			visitWorkspace(workspace);
+		} else {
+			for (const ws of apexDefinitionsByWorkspace.keys()) {
+				visitWorkspace(ws);
+			}
+		}
+		return {
+			success: true,
+			workspace: workspace ?? null,
+			definitions: Array.from(apexDefinitionsByWorkspace.entries()).map(
+				([ws, files]) => ({
+					workspace: ws,
+					count: files.length,
+					paths: files.map((file) => file.path),
+				}),
 			),
+			contexts,
 		};
 	}
 
 	return {
 		create,
 		getExternalFiles: (project: ts.server.Project) => {
-			console.log(
-				"[tatzeroko-plugin] getExternalFiles",
-				project.getCurrentDirectory(),
-			);
-			project.projectService.logger?.info?.(
-				`tatzeroko: getExternalFiles for ${project.getCurrentDirectory()}`,
-			);
 			const rawWorkspace = findSalesforceWorkspaceRoot(
 				typescript,
 				project.getCurrentDirectory(),
@@ -343,25 +256,12 @@ function init(modules: { typescript: typeof ts }) {
 				return [];
 			}
 			const workspace = typescript.server.toNormalizedPath(rawWorkspace);
-			console.log(`[tatzeroko-plugin] getExternalFiles workspace=${workspace}`);
 			const files: string[] = [];
-			project.projectService.logger?.info?.(
-				`tatzeroko: seeding files for ${workspace}`,
-			);
-			const definitions = workspaceApexDefinitions.get(workspace) ?? [];
-			project.projectService.logger?.info?.(
-				`tatzeroko: getExternalFiles workspace=${workspace} count=${definitions.length}`,
-			);
+			const definitions = apexDefinitionsByWorkspace.get(workspace) ?? [];
 			for (const definition of definitions) {
-				console.log(
-					`[tatzeroko-plugin] getExternalFiles definition path=${definition.path} module=${definition.moduleName} length=${definition.content.length}`,
-				);
-				project.projectService.logger?.info?.(
-					`tatzeroko: getExternalFiles loading path=${definition.path} module=${definition.moduleName} length=${definition.content.length}`,
-				);
-				for (const ctx of getContextsForWorkspace(workspace)) {
+				ProjectContext.forEachMatchingWorkspace(workspace, (_, ctx) => {
 					ctx.vfs.set(definition.path, definition.content);
-				}
+				});
 				loadFile(typescript, project, definition.path, definition.content);
 				files.push(typescript.server.toNormalizedPath(definition.path));
 			}

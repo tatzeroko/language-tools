@@ -6,7 +6,7 @@
 		"sourceMap": true,
 		"rootDir": "src",
 		"strict": true,
-		"skipLibCheck": true,
+		"skipLibCheck": true
 	},
 	"include": ["src/**/*.ts"],
 	"exclude": ["src/test/**/*.ts", "test-fixtures/**"]

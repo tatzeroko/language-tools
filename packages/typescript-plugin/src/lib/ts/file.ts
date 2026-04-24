@@ -1,33 +1,46 @@
 import type * as ts from "typescript/lib/tsserverlibrary";
 
+type LoadableProject = Pick<
+	ts.server.Project,
+	"containsFile" | "readFile" | "addRoot"
+> & {
+	projectService: Pick<
+		ts.server.ProjectService,
+		"getOrCreateScriptInfoForNormalizedPath"
+	>;
+};
+
+type UnloadableProject = Pick<ts.server.Project, "removeFile"> & {
+	projectService: Pick<ts.server.ProjectService, "getScriptInfo">;
+};
+
+type ScriptInfoWithContent = ts.server.ScriptInfo & {
+	getSnapshot?: () => {
+		getLength: () => number;
+		getText: (start: number, end: number) => string;
+	};
+	editContent?: (start: number, end: number, newText: string) => void;
+};
+
 /**
- * Loads a file into the given TypeScript project if it is not already present.
+ * Loads or refreshes a file in the given TypeScript project.
  *
  * @param typescript The TypeScript module reference provided by the plugin.
  * @param project The TypeScript server project instance.
  * @param path The file path to load.
- * @param content The content of the file to load. Used
+ * @param content Optional file content. When omitted, the file is read from the project host.
  */
 export function loadFile(
 	typescript: typeof ts,
-	project: ts.server.Project,
+	project: LoadableProject,
 	path: string,
 	content?: string,
 ) {
 	const normalizedPath = typescript.server.toNormalizedPath(path);
 	const fileContent = content ?? project.readFile(normalizedPath);
-	console.log(
-		`[tatzeroko-plugin] loadFile start path=${normalizedPath} source=${content ? "provided" : "project.readFile"}`,
-	);
 	if (fileContent === undefined) {
-		console.log(
-			`[tatzeroko-plugin] loadFile skipped path=${normalizedPath} reason=no-content`,
-		);
 		return;
 	}
-	console.log(
-		`[tatzeroko-plugin] loadFile path=${normalizedPath} contentLength=${fileContent.length} contains=${project.containsFile(normalizedPath)}`,
-	);
 
 	const scriptInfo =
 		project.projectService.getOrCreateScriptInfoForNormalizedPath(
@@ -37,23 +50,13 @@ export function loadFile(
 		);
 
 	if (!scriptInfo) {
-		console.log(
-			`[tatzeroko-plugin] loadFile skipped path=${normalizedPath} reason=no-script-info`,
-		);
 		return;
 	}
 
-	const scriptInfoWithContent = scriptInfo as unknown as {
-		getSnapshot?: () => {
-			getLength: () => number;
-			getText: (start: number, end: number) => string;
-		};
-		editContent?: (start: number, end: number, newText: string) => void;
-	};
+	const scriptInfoWithContent = scriptInfo as ScriptInfoWithContent;
 	const snapshot = scriptInfoWithContent.getSnapshot?.();
 	const existingText = snapshot?.getText(0, snapshot.getLength()) ?? undefined;
 	if (existingText !== fileContent && scriptInfoWithContent.editContent) {
-		console.log(`[tatzeroko-plugin] loadFile refresh path=${normalizedPath}`);
 		scriptInfoWithContent.editContent(
 			0,
 			snapshot?.getLength() ?? 0,
@@ -61,14 +64,9 @@ export function loadFile(
 		);
 	}
 
-	console.log(`[tatzeroko-plugin] loadFile addRoot path=${normalizedPath}`);
 	try {
 		project.addRoot(scriptInfo);
-	} catch (error) {
-		console.log(
-			`[tatzeroko-plugin] loadFile addRoot failed path=${normalizedPath} error=${String(error)}`,
-		);
-	}
+	} catch {}
 }
 
 /**
@@ -80,16 +78,12 @@ export function loadFile(
  */
 export function unloadFile(
 	typescript: typeof ts,
-	project: ts.server.Project,
+	project: UnloadableProject,
 	path: string,
 ) {
 	const normalizedPath = typescript.server.toNormalizedPath(path);
-	console.log(`[tatzeroko-plugin] unloadFile path=${normalizedPath}`);
 	const scriptInfo = project.projectService.getScriptInfo(normalizedPath);
 	if (!scriptInfo) {
-		console.log(
-			`[tatzeroko-plugin] unloadFile skipped path=${normalizedPath} reason=no-script-info`,
-		);
 		return;
 	}
 
@@ -98,5 +92,4 @@ export function unloadFile(
 		/*fileExists*/ false,
 		/*detachFromProject*/ true,
 	);
-	console.log(`[tatzeroko-plugin] unloadFile updated path=${normalizedPath}`);
 }
