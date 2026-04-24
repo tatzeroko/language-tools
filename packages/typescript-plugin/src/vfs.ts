@@ -39,16 +39,6 @@ export class VirtualFileStore {
 	}
 
 	/**
-	 * Sets a virtual file directly.
-	 *
-	 * @param path The file path to set in the virtual file system.
-	 * @param virtualFile The VirtualFile instance to store.
-	 */
-	setVirtualFile(path: string, virtualFile: VirtualFile) {
-		this.files.set(path, virtualFile);
-	}
-
-	/**
 	 * Retrieves a virtual file by its path.
 	 *
 	 * @param path The file path to retrieve from the virtual file system.
@@ -87,5 +77,40 @@ export class VirtualFileStore {
 	 */
 	list() {
 		return Array.from(this.files.keys());
+	}
+
+	/**
+	 * Checks whether any virtual file exists under the given directory prefix.
+	 */
+	hasPrefix(prefix: string) {
+		for (const path of this.files.keys()) {
+			if (path.startsWith(prefix)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Returns virtual file paths under a directory prefix, optionally filtered by extensions.
+	 */
+	listUnderPrefix(prefix: string, extensions?: readonly string[]) {
+		const suffixes = extensions?.length ? new Set(extensions) : undefined;
+		const paths: string[] = [];
+		for (const filePath of this.files.keys()) {
+			if (!filePath.startsWith(prefix)) continue;
+			if (suffixes) {
+				let matched = false;
+				for (const ext of suffixes) {
+					if (filePath.endsWith(ext)) {
+						matched = true;
+						break;
+					}
+				}
+				if (!matched) continue;
+			}
+			paths.push(filePath);
+		}
+		return paths;
 	}
 }

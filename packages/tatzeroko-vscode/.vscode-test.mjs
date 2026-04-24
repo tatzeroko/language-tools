@@ -1,6 +1,6 @@
-import { defineConfig } from "@vscode/test-cli";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { defineConfig } from "@vscode/test-cli";
 
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 

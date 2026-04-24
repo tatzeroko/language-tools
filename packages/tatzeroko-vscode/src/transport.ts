@@ -17,7 +17,6 @@ export function pickTsProbeFile(
 
 export async function findTsProbeFile(workspaceRoot: string) {
 	const vscode = await import("vscode");
-	console.log("[tatzeroko] findTsProbeFile start", workspaceRoot);
 	const deadline = Date.now() + 5000;
 	while (Date.now() < deadline) {
 		const document = pickTsProbeFile(
@@ -25,11 +24,9 @@ export async function findTsProbeFile(workspaceRoot: string) {
 			vscode.workspace.textDocuments,
 		);
 		if (document) {
-			console.log("[tatzeroko] findTsProbeFile hit", document.uri.fsPath);
 			return document.uri.fsPath;
 		}
 		await new Promise((resolve) => setTimeout(resolve, 250));
 	}
-	console.log("[tatzeroko] findTsProbeFile timeout", workspaceRoot);
 	return undefined;
 }

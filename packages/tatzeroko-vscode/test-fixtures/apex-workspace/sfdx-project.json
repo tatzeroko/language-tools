@@ -1,10 +1,10 @@
 {
-  "packageDirectories": [
-    {
-      "path": "force-app",
-      "default": true
-    }
-  ],
-  "name": "test",
-  "sourceApiVersion": "66.0"
+	"packageDirectories": [
+		{
+			"path": "force-app",
+			"default": true
+		}
+	],
+	"name": "test",
+	"sourceApiVersion": "66.0"
 }

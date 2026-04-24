@@ -2,10 +2,30 @@ import * as path from "node:path";
 
 import { renderApexDocBlock } from "./apex-doc";
 
-type ApexParser = any;
+type TreeSitterNode = {
+	type: string;
+	text: string;
+	namedChildren: TreeSitterNode[];
+	previousNamedSibling?: TreeSitterNode;
+	descendantsOfType(type: string): TreeSitterNode[];
+};
 
-let cachedParser: ApexParser | null | undefined;
+type TreeSitterTree = {
+	rootNode: TreeSitterNode;
+};
 
+type TreeSitterParser = {
+	setLanguage(language: unknown): void;
+	parse(content: string): TreeSitterTree;
+};
+
+type TreeSitterParserCtor = new () => TreeSitterParser;
+
+type ApexParser = TreeSitterParser | null;
+
+let cachedParser: ApexParser | undefined;
+
+/** Generated virtual Apex declaration file. */
 export type ApexVirtualFile = {
 	readonly path: string;
 	readonly content: string;
@@ -44,6 +64,9 @@ const PRIMITIVE_TYPE_MAP: Record<string, string> = {
 	void: "void",
 };
 
+/**
+ * Generates virtual Apex declaration files for the given workspace sources.
+ */
 export function generateApexVirtualFiles(
 	workspaceRoot: string,
 	sources: ReadonlyArray<readonly [string, string]>,
@@ -51,8 +74,8 @@ export function generateApexVirtualFiles(
 ) {
 	const placeholder = options.placeholder ?? false;
 	const parser = getApexParser();
-
 	const files: ApexVirtualFile[] = [];
+
 	for (const [, content] of sources) {
 		for (const apexClass of parseApexFile(parser, content)) {
 			for (const method of apexClass.methods) {
@@ -64,7 +87,7 @@ export function generateApexVirtualFiles(
 				);
 				files.push({
 					path: virtualPath,
-					content: renderModuleWithMode(apexClass.name, method, placeholder),
+					content: renderModuleWithMode(method, placeholder),
 					moduleName,
 				});
 			}
@@ -82,12 +105,12 @@ function getApexParser() {
 	try {
 		// Native Tree-sitter bindings loaded lazily so startup never fails here.
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const Parser = require("tree-sitter");
+		const Parser = require("tree-sitter") as TreeSitterParserCtor;
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		const TsSfApex = require("tree-sitter-sfapex");
+		const TsSfApex = require("tree-sitter-sfapex") as { apex: unknown };
 		const parser = new Parser();
 		parser.setLanguage(TsSfApex.apex);
-		cachedParser = parser as ApexParser;
+		cachedParser = parser;
 	} catch {
 		cachedParser = null;
 	}
@@ -95,7 +118,7 @@ function getApexParser() {
 	return cachedParser;
 }
 
-function parseApexFile(parser: ApexParser | null, content: string) {
+function parseApexFile(parser: ApexParser, content: string) {
 	if (!parser) {
 		return parseApexFileFallback(content);
 	}
@@ -115,10 +138,12 @@ function parseApexFile(parser: ApexParser | null, content: string) {
 			if (!hasAuraEnabledAnnotation(methodNode)) continue;
 			const methodName = extractMethodName(methodNode);
 			if (!methodName) continue;
-			const returnType = extractReturnType(methodNode);
-			const params = extractParameters(methodNode);
-			const docComment = extractDocComment(methodNode);
-			methods.push({ name: methodName, params, returnType, docComment });
+			methods.push({
+				name: methodName,
+				params: extractParameters(methodNode),
+				returnType: extractReturnType(methodNode),
+				docComment: extractDocComment(methodNode),
+			});
 		}
 
 		if (methods.length > 0) {
@@ -149,9 +174,10 @@ function parseApexFileFallback(content: string) {
 			.filter(Boolean)
 			.map((param, index) => {
 				const pieces = param.split(/\s+/).filter(Boolean);
-				const type = pieces.length >= 2 ? pieces[0] : "unknown";
-				const name = pieces.length >= 2 ? pieces[1] : `arg${index}`;
-				return { name, type };
+				return {
+					name: pieces.length >= 2 ? pieces[1] : `arg${index}`,
+					type: pieces.length >= 2 ? pieces[0] : "unknown",
+				};
 			});
 		methods.push({
 			name: methodName,
@@ -168,41 +194,35 @@ function parseApexFileFallback(content: string) {
 	return classes;
 }
 
-function extractClassName(classNode: {
-	namedChildren: Array<{ type: string; text: string }>;
-}) {
+function extractClassName(classNode: TreeSitterNode) {
 	const identifier = classNode.namedChildren.find(
 		(child) => child.type === "identifier",
 	);
 	return identifier?.text?.trim();
 }
 
-function hasAuraEnabledAnnotation(methodNode: { namedChildren: Array<any> }) {
+function hasAuraEnabledAnnotation(methodNode: TreeSitterNode) {
 	const modifiers = methodNode.namedChildren.find(
 		(child) => child.type === "modifiers",
 	);
 	if (!modifiers) return false;
-	return modifiers.namedChildren?.some((child: any) => {
+	return modifiers.namedChildren.some((child) => {
 		if (child.type !== "annotation") return false;
-		const identifier = child.namedChildren?.find(
-			(grand: any) => grand.type === "identifier",
+		const identifier = child.namedChildren.find(
+			(grand) => grand.type === "identifier",
 		);
 		return identifier?.text === "AuraEnabled";
 	});
 }
 
-function extractMethodName(methodNode: {
-	namedChildren: Array<{ type: string; text: string }>;
-}) {
+function extractMethodName(methodNode: TreeSitterNode) {
 	const identifier = methodNode.namedChildren.find(
 		(child) => child.type === "identifier",
 	);
 	return identifier?.text;
 }
 
-function extractReturnType(methodNode: {
-	namedChildren: Array<{ type: string; text: string }>;
-}) {
+function extractReturnType(methodNode: TreeSitterNode) {
 	const candidate = methodNode.namedChildren.find((child) => {
 		return (
 			child.type !== "modifiers" &&
@@ -214,21 +234,21 @@ function extractReturnType(methodNode: {
 	return candidate?.text?.trim() ?? "void";
 }
 
-function extractParameters(methodNode: { namedChildren: Array<any> }) {
+function extractParameters(methodNode: TreeSitterNode) {
 	const paramsNode = methodNode.namedChildren.find(
 		(child) => child.type === "formal_parameters",
 	);
 	if (!paramsNode) return [];
 
 	return paramsNode.namedChildren
-		.filter((child: any) => child.type === "formal_parameter")
-		.map((param: any, index: number) => {
+		.filter((child) => child.type === "formal_parameter")
+		.map((param, index) => {
 			const nameNode = param.namedChildren.find(
-				(child: any) => child.type === "identifier",
+				(child) => child.type === "identifier",
 			);
-			const typeNode = param.namedChildren.find((child: any) => {
-				return child.type !== "modifiers" && child.type !== "identifier";
-			});
+			const typeNode = param.namedChildren.find(
+				(child) => child.type !== "modifiers" && child.type !== "identifier",
+			);
 			return {
 				name: nameNode?.text?.trim() ?? `arg${index}`,
 				type: typeNode?.text?.trim() ?? "unknown",
@@ -236,36 +256,28 @@ function extractParameters(methodNode: { namedChildren: Array<any> }) {
 		});
 }
 
-function extractDocComment(methodNode: { previousNamedSibling?: any }) {
+function extractDocComment(methodNode: TreeSitterNode) {
 	const sibling = methodNode.previousNamedSibling;
-	if (sibling?.type === "block_comment") {
-		return sibling.text;
-	}
-	return undefined;
+	return sibling?.type === "block_comment" ? sibling.text : undefined;
 }
 
-function renderModule(className: string, method: ApexMethod) {
+function renderModule(method: ApexMethod) {
 	const docBlock = renderApexDocBlock(method.docComment);
 	const returnType = mapApexType(method.returnType);
 	const paramsType = !method.params.length
 		? "Record<string, unknown>"
-		: `{\n${method.params
-				.map((param) => `\t${param.name}: ${mapApexType(param.type)};`)
-				.join("\n")}\n}`;
+		: `{
+${method.params.map((param) => `\t${param.name}: ${mapApexType(param.type)};`).join("\n")}
+}`;
 	return `${docBlock}export default function ${method.name}(params: ${paramsType}): Promise<${returnType}>;`;
 }
 
-function renderModuleWithMode(
-	className: string,
-	method: ApexMethod,
-	placeholder: boolean,
-) {
+function renderModuleWithMode(method: ApexMethod, placeholder: boolean) {
 	if (!placeholder) {
-		return renderModule(className, method);
+		return renderModule(method);
 	}
 
 	const docBlock = renderApexDocBlock(method.docComment);
-	void className;
 	return `${docBlock}export default function ${method.name}(params: unknown): Promise<unknown>;`;
 }
 
@@ -301,13 +313,4 @@ function getVirtualFilePath(
 		"apex",
 		`${className}.${methodName}.d.ts`,
 	);
-}
-
-function sanitizeIdentifier(value: string) {
-	return value.replace(/[^A-Za-z0-9_]/g, "");
-}
-
-function capitalize(value: string) {
-	if (!value) return "";
-	return value.charAt(0).toUpperCase() + value.slice(1);
 }

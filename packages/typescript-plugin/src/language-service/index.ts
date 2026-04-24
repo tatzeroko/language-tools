@@ -5,20 +5,28 @@ import type { VirtualFileStore } from "../vfs";
 
 type ApexModuleResolver = (moduleName: string) => string | undefined;
 
+type ApexScriptInfoService = Pick<
+	ts.server.ProjectService,
+	"getOrCreateScriptInfoForNormalizedPath"
+>;
+
+function toNormalizedPath(typescript: typeof ts, fileName: string) {
+	return typescript.server.toNormalizedPath(
+		fileName,
+	) as ts.server.NormalizedPath;
+}
+
 export function decorateLanguageService(
 	workspace: string,
 	typescript: typeof ts,
 	host: ts.LanguageServiceHost,
 	ls: ts.LanguageService,
 	vfs: VirtualFileStore,
-	projectService: ts.server.ProjectService,
-	project: ts.server.Project,
+	projectService: ApexScriptInfoService,
+	project: Pick<ts.server.Project, "addRoot">,
 	dispose: () => void,
 	resolveApexModule?: ApexModuleResolver,
 ) {
-	console.log(
-		`[tatzeroko-plugin] decorateLanguageService workspace=${workspace} vfsCount=${vfs.list().length}`,
-	);
 	decorateLanguageServiceHost(
 		workspace,
 		typescript,
@@ -30,10 +38,6 @@ export function decorateLanguageService(
 	);
 	decorateLanguageServiceInner(ls, dispose);
 	return ls;
-}
-
-function isVirtualApexPath(normalizedPath: string) {
-	return normalizedPath.includes("/.tatzeroko/virtual/apex/");
 }
 
 function isSalesforceGeneratedApexTypings(normalizedPath: string) {
@@ -58,8 +62,8 @@ function decorateLanguageServiceHost(
 	typescript: typeof ts,
 	host: ts.LanguageServiceHost,
 	vfs: VirtualFileStore,
-	projectService: ts.server.ProjectService,
-	project: ts.server.Project,
+	projectService: ApexScriptInfoService,
+	project: Pick<ts.server.Project, "addRoot">,
 	resolveApexModule?: ApexModuleResolver,
 ) {
 	const orig = {
@@ -76,18 +80,9 @@ function decorateLanguageServiceHost(
 
 	const resolveApexModulePath = (moduleName: string) => {
 		if (!resolveApexModule) {
-			console.log(
-				`[tatzeroko-plugin] resolveApexModulePath no-resolver module=${moduleName}`,
-			);
 			return undefined;
 		}
-		const resolved = resolveApexModule(moduleName);
-		if (moduleName.startsWith("@salesforce/apex/")) {
-			console.log(
-				`[tatzeroko-plugin] resolveApexModule module=${moduleName} resolved=${resolved ?? "undefined"}`,
-			);
-		}
-		return resolved;
+		return resolveApexModule(moduleName);
 	};
 
 	const createApexResolvedModule = (moduleName: string) => {
@@ -104,7 +99,7 @@ function decorateLanguageServiceHost(
 	};
 
 	const ensurePlaceholderVirtualFile = (normalizedPath: string) => {
-		const normalizedVirtualPath = normalizedPath as ts.server.NormalizedPath;
+		const normalizedVirtualPath = toNormalizedPath(typescript, normalizedPath);
 		if (vfs.has(normalizedPath)) {
 			return;
 		}
@@ -112,9 +107,6 @@ function decorateLanguageServiceHost(
 		if (!content) {
 			return;
 		}
-		console.log(
-			`[tatzeroko-plugin] ensurePlaceholderVirtualFile path=${normalizedPath} length=${content.length}`,
-		);
 		vfs.set(normalizedPath, content);
 		const scriptInfo = projectService.getOrCreateScriptInfoForNormalizedPath(
 			normalizedVirtualPath,
@@ -124,98 +116,61 @@ function decorateLanguageServiceHost(
 		if (scriptInfo) {
 			try {
 				project.addRoot(scriptInfo);
-			} catch (error) {
-				console.log(
-					`[tatzeroko-plugin] ensurePlaceholderVirtualFile addRoot failed path=${normalizedPath} error=${String(error)}`,
-				);
-			}
+			} catch {}
 		}
 	};
 
 	host.getScriptFileNames = () => {
+		const virtualFiles = vfs.list();
 		const scriptFileNames = (orig.getScriptFileNames?.() ?? []).filter(
 			(fileName) =>
-				!shouldIgnoreApexTyping(typescript.server.toNormalizedPath(fileName)),
+				!shouldIgnoreApexTyping(toNormalizedPath(typescript, fileName)),
 		);
-		const virtualFiles = vfs.list();
-		if (virtualFiles.length) {
-			console.log(
-				`[tatzeroko-plugin] getScriptFileNames virtual=${virtualFiles.join(",")}`,
-			);
-		}
 		return [...scriptFileNames, ...virtualFiles];
 	};
 
 	host.getScriptSnapshot = (fileName: string) => {
-		const normalized = typescript.server.toNormalizedPath(fileName);
+		const normalized = toNormalizedPath(typescript, fileName);
 		if (shouldIgnoreApexTyping(normalized)) {
 			return undefined;
 		}
 		const content = vfs.get(normalized)?.buffer.toString("utf8");
-		if (content !== undefined) {
-			console.log(
-				`[tatzeroko-plugin] getScriptSnapshot virtual path=${normalized} length=${content.length}`,
-			);
+		if (content !== undefined)
 			return typescript.ScriptSnapshot.fromString(content);
-		}
 		return orig.getScriptSnapshot?.(fileName);
 	};
 
 	host.getScriptVersion = (fileName: string) => {
-		const normalized = typescript.server.toNormalizedPath(fileName);
+		const normalized = toNormalizedPath(typescript, fileName);
 		const version = vfs.get(normalized)?.version.toString();
-		if (version !== undefined) {
-			console.log(
-				`[tatzeroko-plugin] getScriptVersion virtual path=${normalized} version=${version}`,
-			);
-			return version;
-		}
+		if (version !== undefined) return version;
 		return orig.getScriptVersion?.(fileName);
 	};
 
 	host.readFile = (fileName: string) => {
-		const normalized = typescript.server.toNormalizedPath(fileName);
+		const normalized = toNormalizedPath(typescript, fileName);
 		if (shouldIgnoreApexTyping(normalized)) {
 			return undefined;
 		}
 		const content = vfs.get(normalized)?.buffer.toString("utf8");
-		if (content !== undefined) {
-			console.log(
-				`[tatzeroko-plugin] readFile virtual path=${normalized} length=${content.length}`,
-			);
-			return content;
-		}
+		if (content !== undefined) return content;
 		return orig.readFile?.(fileName);
 	};
 
 	host.fileExists = (fileName: string) => {
-		const normalized = typescript.server.toNormalizedPath(fileName);
+		const normalized = toNormalizedPath(typescript, fileName);
 		if (shouldIgnoreApexTyping(normalized)) {
 			return false;
 		}
-		const exists =
-			vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
-		if (isVirtualApexPath(normalized)) {
-			console.log(
-				`[tatzeroko-plugin] fileExists path=${normalized} exists=${exists}`,
-			);
-		}
-		return exists;
+		return vfs.has(normalized) || (orig.fileExists?.(fileName) ?? false);
 	};
 
 	host.directoryExists = (directoryName: string) => {
-		const normalized = typescript.server.toNormalizedPath(directoryName);
-		const exists =
-			Array.from(vfs.list()).some((file) =>
-				file.startsWith(`${normalized}/`),
-			) ||
-			(orig.directoryExists?.(directoryName) ?? false);
-		if (normalized.includes("/.tatzeroko/virtual/apex/")) {
-			console.log(
-				`[tatzeroko-plugin] directoryExists path=${normalized} exists=${exists}`,
-			);
-		}
-		return exists;
+		const normalized = toNormalizedPath(typescript, directoryName);
+		return (
+			vfs.hasPrefix(`${normalized}/`) ||
+			(orig.directoryExists?.(directoryName) ?? false)
+		);
 	};
 
 	host.readDirectory = (
@@ -234,27 +189,14 @@ function decorateLanguageServiceHost(
 				depth,
 			) ?? [];
 		const filteredBase = base.filter(
-			(file) =>
-				!shouldIgnoreApexTyping(typescript.server.toNormalizedPath(file)),
+			(file) => !shouldIgnoreApexTyping(toNormalizedPath(typescript, file)),
 		);
-		const normalizedDir = typescript.server.toNormalizedPath(directoryName);
-		const suffixes = new Set(extensions ?? []);
-		const virtualFiles = vfs
-			.list()
-			.filter((file) => file.startsWith(`${normalizedDir}/`))
-			.filter((file) => !shouldIgnoreApexTyping(file))
-			.filter((file) => {
-				if (!suffixes.size) {
-					return true;
-				}
-				return Array.from(suffixes).some((ext) => file.endsWith(ext));
-			});
-		if (normalizedDir.includes("/.tatzeroko/virtual/apex/")) {
-			console.log(
-				`[tatzeroko-plugin] readDirectory path=${normalizedDir} base=${base.length} virtual=${virtualFiles.length} extensions=${Array.from(suffixes).join(",")}`,
-			);
-		}
-		return Array.from(new Set([...filteredBase, ...virtualFiles]));
+		const normalizedDir = toNormalizedPath(typescript, directoryName);
+		const matchingVirtualFiles = vfs.listUnderPrefix(
+			`${normalizedDir}/`,
+			extensions,
+		);
+		return Array.from(new Set([...filteredBase, ...matchingVirtualFiles]));
 	};
 
 	host.resolveModuleNameLiterals = (
@@ -278,31 +220,22 @@ function decorateLanguageServiceHost(
 		return moduleLiterals.map((moduleLiteral, index) => {
 			const moduleName = moduleLiteral.text;
 			const resolution = resolutions[index];
-			if (moduleName.startsWith("@salesforce/apex/")) {
-				console.log(
-					`[tatzeroko-plugin] resolveModuleNameLiterals module=${moduleName} containing=${containingFile} baseResolved=${resolution?.resolvedModule?.resolvedFileName ?? "undefined"}`,
-				);
-			}
 
 			if (moduleName.startsWith("@salesforce/apex/")) {
 				const resolvedModule = createApexResolvedModule(moduleName);
-				if (resolvedModule) {
-					console.log(
-						`[tatzeroko-plugin] resolveModuleNameLiterals apexHit module=${moduleName} resolved=${resolvedModule.resolvedFileName}`,
-					);
-					return { resolvedModule };
-				}
+				if (resolvedModule) return { resolvedModule };
 			}
 
 			if (!moduleName.startsWith("c/")) {
 				return resolution;
 			}
-			console.log(
-				`[tatzeroko-plugin] resolveModuleNameLiterals c-module containing=${containingFile} module=${moduleName}`,
-			);
 
 			const componentName = moduleName.substring(2);
-			for (const ctx of ProjectContext.getAllInWorkspace(workspace)) {
+			let resolutionResult:
+				| ts.ResolvedModuleWithFailedLookupLocations
+				| undefined;
+			ProjectContext.forEachMatchingWorkspace(workspace, (_, ctx) => {
+				if (resolutionResult) return;
 				const componentFolder = path.join(
 					ctx.project.getCurrentDirectory(),
 					componentName,
@@ -319,15 +252,17 @@ function decorateLanguageServiceHost(
 						`${componentName}${ext}`,
 					);
 					if (ctx.host.fileExists?.(candidate)) {
-						return {
+						resolutionResult = {
 							resolvedModule: {
 								extension,
-								resolvedFileName: typescript.server.toNormalizedPath(candidate),
+								resolvedFileName: toNormalizedPath(typescript, candidate),
 							},
 						};
+						return;
 					}
 				}
-			}
+			});
+			if (resolutionResult) return resolutionResult;
 
 			return resolution;
 		});
@@ -348,19 +283,14 @@ function decorateLanguageServiceHost(
 			return createApexResolvedModule(moduleName);
 		});
 		if (apexResolutions.some(Boolean)) {
-			return apexResolutions.map((resolution, index) => {
-				if (resolution) {
-					console.log(
-						`[tatzeroko-plugin] resolveModuleNames apexHit module=${moduleNames[index]} containing=${containingFile} resolved=${resolution.resolvedFileName}`,
-					);
-					return resolution;
-				}
+			return apexResolutions.map((resolution, _index) => {
+				if (resolution) return resolution;
 				return undefined;
 			});
 		}
 
-		const literals = moduleNames.map(
-			(text) => ({ text }) as ts.StringLiteralLike,
+		const literals = moduleNames.map((text) =>
+			typescript.factory.createStringLiteral(text),
 		);
 		const literalResolutions = containingSourceFile
 			? host.resolveModuleNameLiterals?.(

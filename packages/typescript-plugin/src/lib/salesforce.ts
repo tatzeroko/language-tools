@@ -15,7 +15,7 @@ import type ts from "typescript/lib/tsserverlibrary";
  *
  * @param typescript The TypeScript module reference provided by the plugin.
  * @param startDir The starting directory for the upward search.
- * @return The resolved path to the Salesforce workspace root, or `undefined` if not found.
+ * @returns The resolved path to the Salesforce workspace root, or `undefined` if not found.
  */
 export function findSalesforceWorkspaceRoot(
 	typescript: typeof ts,
@@ -56,7 +56,7 @@ export function findSalesforceWorkspaceRoot(
  *
  * @param typescript The TypeScript module reference provided by the plugin.
  * @param project The TypeScript server project instance.
- * @return `true` if a Salesforce workspace root is found; otherwise `false`.
+ * @returns `true` if a Salesforce workspace root is found; otherwise `false`.
  */
 export function isSalesforceWorkspace(
 	typescript: typeof ts,
