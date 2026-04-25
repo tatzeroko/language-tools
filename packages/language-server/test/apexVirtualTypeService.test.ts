@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ApexVirtualTypeService } from "../src/apex";
+import { ApexWorkerClient } from "../src/apex-worker-client";
 
 type ApexPayload = {
 	workspace: string;
@@ -297,6 +298,40 @@ describe("ApexVirtualTypeService", () => {
 				files: Array<{ moduleName: string; content: string }>;
 			};
 			expect(value.files.map((file) => file.moduleName)).toContain(
+				"@salesforce/apex/ContactController.count",
+			);
+		} finally {
+			fs.rmSync(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("falls back to direct generation when the worker script is missing", async () => {
+		const workspace = fs.mkdtempSync(
+			path.join(process.cwd(), "apex-workspace-"),
+		);
+		try {
+			const worker = new ApexWorkerClient(workspace);
+			(
+				worker as unknown as { hasWorkerScript: () => boolean }
+			).hasWorkerScript = () => false;
+			const apexPath = path.join(workspace, "classes", "ContactController.cls");
+			fs.mkdirSync(path.dirname(apexPath), { recursive: true });
+			fs.writeFileSync(
+				apexPath,
+				`global class ContactController {
+				    @AuraEnabled
+				    public static Integer count() {
+				        return 0;
+				    }
+				}`,
+				"utf8",
+			);
+
+			const files = await worker.generate([
+				[apexPath, fs.readFileSync(apexPath, "utf8")],
+			]);
+			expect(files).toHaveLength(1);
+			expect(files[0]?.moduleName).toBe(
 				"@salesforce/apex/ContactController.count",
 			);
 		} finally {
