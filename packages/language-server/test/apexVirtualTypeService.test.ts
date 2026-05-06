@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ApexVirtualTypeService } from "../src/apex";
+import { generateApexVirtualFiles } from "../src/apex-generator";
 import { ApexWorkerClient } from "../src/apex-worker-client";
 
 type ApexPayload = {
@@ -337,5 +338,31 @@ describe("ApexVirtualTypeService", () => {
 		} finally {
 			fs.rmSync(workspace, { recursive: true, force: true });
 		}
+	});
+
+	it("keeps nested class methods scoped to their class body", () => {
+		const files = generateApexVirtualFiles("/workspace", [
+			[
+				"/workspace/classes/OuterController.cls",
+				`global class OuterController {
+    @AuraEnabled
+    public static String outer() {
+        return 'ok';
+    }
+
+    public class InnerController {
+        @AuraEnabled
+        public static Integer inner() {
+            return 1;
+        }
+    }
+}`,
+			],
+		]);
+
+		expect(files.map((file) => file.moduleName)).toEqual([
+			"@salesforce/apex/OuterController.outer",
+			"@salesforce/apex/InnerController.inner",
+		]);
 	});
 });
