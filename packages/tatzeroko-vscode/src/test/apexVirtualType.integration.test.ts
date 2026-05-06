@@ -15,6 +15,53 @@ const documentPath = path.join(
 	"contactViewer.js",
 );
 const documentUri = vscode.Uri.file(documentPath);
+const nestedDocumentPath = path.join(
+	fixtureRoot,
+	"force-app",
+	"main",
+	"default",
+	"lwc",
+	"nestedContactViewer",
+	"nestedContactViewer.js",
+);
+const nestedDocumentUri = vscode.Uri.file(nestedDocumentPath);
+const packageDocumentPath = path.join(
+	fixtureRoot,
+	"packages",
+	"feature-a",
+	"main",
+	"default",
+	"lwc",
+	"packageContactViewer",
+	"packageContactViewer.js",
+);
+const packageDocumentUri = vscode.Uri.file(packageDocumentPath);
+
+type FixtureCase = {
+	readonly name: string;
+	readonly documentPath: string;
+	readonly documentUri: vscode.Uri;
+	readonly assertText?: boolean;
+};
+
+const fixtureCases: FixtureCase[] = [
+	{
+		name: "root jsconfig project",
+		documentPath,
+		documentUri,
+		assertText: true,
+	},
+	{
+		name: "nested jsconfig project",
+		documentPath: nestedDocumentPath,
+		documentUri: nestedDocumentUri,
+	},
+	{
+		name: "nested package project",
+		documentPath: packageDocumentPath,
+		documentUri: packageDocumentUri,
+	},
+];
 
 async function activateExtension() {
 	const extension = vscode.extensions.getExtension(
@@ -41,6 +88,45 @@ async function waitFor<T>(fn: () => Promise<T | undefined>, timeoutMs = 15000) {
 	return lastValue;
 }
 
+async function expectApexTyping(documentUri: vscode.Uri, documentPath: string) {
+	assert.ok(fs.existsSync(documentPath), `${documentPath} is missing`);
+	const document = await vscode.workspace.openTextDocument(documentUri);
+	await vscode.window.showTextDocument(document);
+	const marker = "search({";
+	const markerIndex = document.getText().indexOf(marker);
+	assert.ok(markerIndex >= 0, `expected search call in ${documentPath}`);
+	const position = document.positionAt(markerIndex);
+	const hover = await waitFor(async () => {
+		const hovers = (await vscode.commands.executeCommand(
+			"vscode.executeHoverProvider",
+			document.uri,
+			position,
+		)) as vscode.Hover[] | undefined;
+		return hovers?.find((item) =>
+			hoverText(item).includes("ContactControllerSearchParams"),
+		);
+	});
+	assert.ok(
+		hover,
+		`expected hover with generated Apex params type in ${documentPath}`,
+	);
+	const diagnostics = await waitFor(async () => {
+		const items = vscode.languages.getDiagnostics(document.uri);
+		return items.some(
+			(item) =>
+				item.code === 2307 &&
+				item.message.includes("@salesforce/apex/ContactController.search"),
+		)
+			? undefined
+			: true;
+	}, 15000);
+	assert.strictEqual(
+		diagnostics,
+		true,
+		`expected resolved Apex module to clear TS2307 in ${documentPath}`,
+	);
+}
+
 function hoverText(hover: vscode.Hover | undefined) {
 	if (!hover) {
 		return "";
@@ -59,46 +145,21 @@ function hoverText(hover: vscode.Hover | undefined) {
 }
 
 suite("Apex virtual types integration", () => {
-	test("exposes generated Apex typings in hover", async () => {
-		await activateExtension();
-		const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-		assert.ok(workspace, "expected a workspace folder to be open");
-		assert.strictEqual(workspace, fixtureRoot);
-		assert.ok(fs.existsSync(documentPath), "fixture document is missing");
-		const document = await vscode.workspace.openTextDocument(documentUri);
-		await vscode.window.showTextDocument(document);
-		const marker = "search({";
-		const markerIndex = document.getText().indexOf(marker);
-		assert.ok(markerIndex >= 0, "expected search call in fixture document");
-		const position = document.positionAt(markerIndex);
-		const hover = await waitFor(async () => {
-			const hovers = (await vscode.commands.executeCommand(
-				"vscode.executeHoverProvider",
-				document.uri,
-				position,
-			)) as vscode.Hover[] | undefined;
-			return hovers?.find((item) =>
-				hoverText(item).includes("ContactControllerSearchParams"),
-			);
+	for (const fixtureCase of fixtureCases) {
+		test(`exposes generated Apex typings in ${fixtureCase.name}`, async () => {
+			await activateExtension();
+			const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+			assert.ok(workspace, "expected a workspace folder to be open");
+			assert.strictEqual(workspace, fixtureRoot);
+			await expectApexTyping(fixtureCase.documentUri, fixtureCase.documentPath);
+			if (fixtureCase.assertText) {
+				const document = await vscode.workspace.openTextDocument(
+					fixtureCase.documentUri,
+				);
+				const text = document.getText();
+				assert.match(text, /search\(\{/);
+				assert.match(text, /Finds contacts matching the query\./);
+			}
 		});
-		assert.ok(hover, "expected hover with generated Apex params type");
-		const text = hoverText(hover);
-		assert.match(text, /ContactControllerSearchParams/);
-		assert.match(text, /Finds contacts matching the query\./);
-		const diagnostics = await waitFor(async () => {
-			const items = vscode.languages.getDiagnostics(document.uri);
-			return items.some(
-				(item) =>
-					item.code === 2307 &&
-					item.message.includes("@salesforce/apex/ContactController.search"),
-			)
-				? undefined
-				: true;
-		}, 15000);
-		assert.strictEqual(
-			diagnostics,
-			true,
-			"expected resolved Apex module to clear TS2307",
-		);
-	});
+	}
 });

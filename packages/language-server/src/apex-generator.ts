@@ -25,7 +25,6 @@ type ApexParser = TreeSitterParser | null;
 
 let cachedParser: ApexParser | undefined;
 
-/** Generated virtual Apex declaration file. */
 export type ApexVirtualFile = {
 	readonly path: string;
 	readonly content: string;
@@ -64,20 +63,17 @@ const PRIMITIVE_TYPE_MAP: Record<string, string> = {
 	void: "void",
 };
 
-/**
- * Generates virtual Apex declaration files for the given workspace sources.
- */
 export function generateApexVirtualFiles(
 	workspaceRoot: string,
 	sources: ReadonlyArray<readonly [string, string]>,
 	options: ApexGenerationOptions = {},
 ) {
 	const placeholder = options.placeholder ?? false;
-	const parser = getApexParser();
+	const parser = getCachedApexParser();
 	const files: ApexVirtualFile[] = [];
 
 	for (const [, content] of sources) {
-		for (const apexClass of parseApexFile(parser, content)) {
+		for (const apexClass of parseApexSource(parser, content)) {
 			for (const method of apexClass.methods) {
 				const moduleName = `@salesforce/apex/${apexClass.name}.${method.name}`;
 				const virtualPath = getVirtualFilePath(
@@ -97,7 +93,7 @@ export function generateApexVirtualFiles(
 	return files;
 }
 
-function getApexParser() {
+function getCachedApexParser() {
 	if (cachedParser !== undefined) {
 		return cachedParser;
 	}
@@ -118,33 +114,30 @@ function getApexParser() {
 	return cachedParser;
 }
 
-function parseApexFile(parser: ApexParser, content: string) {
+function parseApexSource(parser: ApexParser, content: string) {
 	if (!parser) {
-		return parseApexFileFallback(content);
+		return parseApexSourceWithoutTreeSitter(content);
 	}
+	return parseApexSourceWithTreeSitter(parser, content);
+}
+
+function parseApexSourceWithTreeSitter(
+	parser: TreeSitterParser,
+	content: string,
+) {
 	const tree = parser.parse(content);
+	return collectApexClassesFromTree(tree.rootNode);
+}
+
+function collectApexClassesFromTree(rootNode: TreeSitterNode) {
 	const classes: ApexClass[] = [];
-
-	for (const classNode of tree.rootNode.descendantsOfType(
-		"class_declaration",
-	)) {
-		const className = extractClassName(classNode);
+	for (const classNode of rootNode.descendantsOfType("class_declaration")) {
+		const className = getNamedChildText(classNode, "identifier");
 		if (!className) continue;
+		const classBody = getNamedChild(classNode, "class_body");
+		if (!classBody) continue;
 
-		const methods: ApexMethod[] = [];
-		for (const methodNode of classNode.descendantsOfType(
-			"method_declaration",
-		)) {
-			if (!hasAuraEnabledAnnotation(methodNode)) continue;
-			const methodName = extractMethodName(methodNode);
-			if (!methodName) continue;
-			methods.push({
-				name: methodName,
-				params: extractParameters(methodNode),
-				returnType: extractReturnType(methodNode),
-				docComment: extractDocComment(methodNode),
-			});
-		}
+		const methods = collectApexMethodsFromClassBody(classBody);
 
 		if (methods.length > 0) {
 			classes.push({ name: className, methods });
@@ -154,7 +147,30 @@ function parseApexFile(parser: ApexParser, content: string) {
 	return classes;
 }
 
-function parseApexFileFallback(content: string) {
+function collectApexMethodsFromClassBody(classBody: TreeSitterNode) {
+	const methods: ApexMethod[] = [];
+	for (const methodNode of classBody.namedChildren) {
+		if (methodNode.type !== "method_declaration") continue;
+		const method = collectApexMethod(methodNode);
+		if (method) methods.push(method);
+	}
+	return methods;
+}
+
+function collectApexMethod(methodNode: TreeSitterNode) {
+	if (!hasAuraEnabledAnnotation(methodNode)) return undefined;
+	const methodName = getNamedChildText(methodNode, "identifier");
+	if (!methodName) return undefined;
+
+	return {
+		name: methodName,
+		params: extractParameters(methodNode),
+		returnType: extractReturnType(methodNode),
+		docComment: extractDocComment(methodNode),
+	};
+}
+
+function parseApexSourceWithoutTreeSitter(content: string) {
 	const classes: ApexClass[] = [];
 	const classMatch = content.match(/class\s+(\w+)\s*\{/);
 	if (!classMatch) {
@@ -194,32 +210,21 @@ function parseApexFileFallback(content: string) {
 	return classes;
 }
 
-function extractClassName(classNode: TreeSitterNode) {
-	const identifier = classNode.namedChildren.find(
-		(child) => child.type === "identifier",
-	);
-	return identifier?.text?.trim();
+function getNamedChildText(node: TreeSitterNode, type: string) {
+	return node.namedChildren.find((child) => child.type === type)?.text?.trim();
+}
+
+function getNamedChild(node: TreeSitterNode, type: string) {
+	return node.namedChildren.find((child) => child.type === type);
 }
 
 function hasAuraEnabledAnnotation(methodNode: TreeSitterNode) {
-	const modifiers = methodNode.namedChildren.find(
-		(child) => child.type === "modifiers",
-	);
+	const modifiers = getNamedChild(methodNode, "modifiers");
 	if (!modifiers) return false;
 	return modifiers.namedChildren.some((child) => {
 		if (child.type !== "annotation") return false;
-		const identifier = child.namedChildren.find(
-			(grand) => grand.type === "identifier",
-		);
-		return identifier?.text === "AuraEnabled";
+		return getNamedChildText(child, "identifier") === "AuraEnabled";
 	});
-}
-
-function extractMethodName(methodNode: TreeSitterNode) {
-	const identifier = methodNode.namedChildren.find(
-		(child) => child.type === "identifier",
-	);
-	return identifier?.text;
 }
 
 function extractReturnType(methodNode: TreeSitterNode) {

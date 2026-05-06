@@ -51,4 +51,38 @@ describe("ProjectContext", () => {
 			child.dispose();
 		}
 	});
+
+	it("matches normalized windows-style workspace roots", () => {
+		const host = {} as typescript.LanguageServiceHost;
+		const parent = new ProjectContext(
+			typescript.server.toNormalizedPath("C:\\workspace"),
+			{} as typescript.server.Project,
+			host,
+			new VirtualFileStore(),
+		);
+		const child = new ProjectContext(
+			typescript.server.toNormalizedPath("C:\\workspace\\sub"),
+			{} as typescript.server.Project,
+			host,
+			new VirtualFileStore(),
+		);
+
+		try {
+			const matches: string[] = [];
+			ProjectContext.forEachMatchingWorkspace(
+				typescript.server.toNormalizedPath("C:\\workspace"),
+				(workspace, ctx) => {
+					matches.push(`${workspace}:${ctx.workspace}`);
+				},
+			);
+
+			expect(matches).toEqual([
+				"C:/workspace:C:/workspace",
+				"C:/workspace/sub:C:/workspace/sub",
+			]);
+		} finally {
+			parent.dispose();
+			child.dispose();
+		}
+	});
 });
