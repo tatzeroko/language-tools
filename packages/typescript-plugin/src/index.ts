@@ -87,8 +87,8 @@ function init(modules: { typescript: typeof ts }) {
 				info.languageServiceHost,
 				info.languageService,
 				context.vfs,
-				info.project.projectService,
 				info.project,
+				info.project.projectService,
 				() => {},
 				(moduleName: string) => resolveApexModulePath(workspace, moduleName),
 			);
@@ -102,8 +102,8 @@ function init(modules: { typescript: typeof ts }) {
 			info.languageServiceHost,
 			info.languageService,
 			context.vfs,
-			info.project.projectService,
 			info.project,
+			info.project.projectService,
 			() => context.dispose(),
 			(moduleName: string) => resolveApexModulePath(workspace, moduleName),
 		);

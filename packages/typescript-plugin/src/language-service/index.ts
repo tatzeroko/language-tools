@@ -5,11 +5,6 @@ import type { VirtualFileStore } from "../vfs";
 
 type ApexModuleResolver = (moduleName: string) => string | undefined;
 
-type ApexScriptInfoService = Pick<
-	ts.server.ProjectService,
-	"getOrCreateScriptInfoForNormalizedPath"
->;
-
 function toNormalizedPath(typescript: typeof ts, fileName: string) {
 	return typescript.server.toNormalizedPath(
 		fileName,
@@ -22,8 +17,11 @@ export function decorateLanguageService(
 	host: ts.LanguageServiceHost,
 	ls: ts.LanguageService,
 	vfs: VirtualFileStore,
-	projectService: ApexScriptInfoService,
 	project: Pick<ts.server.Project, "addRoot">,
+	projectService: Pick<
+		ts.server.ProjectService,
+		"getOrCreateScriptInfoForNormalizedPath"
+	>,
 	dispose: () => void,
 	resolveApexModule?: ApexModuleResolver,
 ) {
@@ -32,8 +30,8 @@ export function decorateLanguageService(
 		typescript,
 		host,
 		vfs,
-		projectService,
 		project,
+		projectService,
 		resolveApexModule,
 	);
 	decorateLanguageServiceInner(ls, dispose);
@@ -48,22 +46,16 @@ function shouldIgnoreApexTyping(normalizedPath: string) {
 	return isSalesforceGeneratedApexTypings(normalizedPath);
 }
 
-function synthesizeVirtualApexContent(normalizedPath: string) {
-	const fileName = path.basename(normalizedPath, ".d.ts");
-	const [, methodName] = fileName.split(".");
-	if (!methodName) {
-		return undefined;
-	}
-	return `export default function ${methodName}(params: unknown): Promise<unknown>;`;
-}
-
 function decorateLanguageServiceHost(
 	workspace: string,
 	typescript: typeof ts,
 	host: ts.LanguageServiceHost,
 	vfs: VirtualFileStore,
-	projectService: ApexScriptInfoService,
 	project: Pick<ts.server.Project, "addRoot">,
+	projectService: Pick<
+		ts.server.ProjectService,
+		"getOrCreateScriptInfoForNormalizedPath"
+	>,
 	resolveApexModule?: ApexModuleResolver,
 ) {
 	const orig = {
@@ -103,10 +95,12 @@ function decorateLanguageServiceHost(
 		if (vfs.has(normalizedPath)) {
 			return;
 		}
-		const content = synthesizeVirtualApexContent(normalizedPath);
-		if (!content) {
+		const fileName = path.basename(normalizedPath, ".d.ts");
+		const [, methodName] = fileName.split(".");
+		if (!methodName) {
 			return;
 		}
+		const content = `export default function ${methodName}(params: unknown): Promise<unknown>;`;
 		vfs.set(normalizedPath, content);
 		const scriptInfo = projectService.getOrCreateScriptInfoForNormalizedPath(
 			normalizedVirtualPath,
