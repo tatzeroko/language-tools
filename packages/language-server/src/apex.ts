@@ -216,8 +216,15 @@ export class ApexVirtualTypeService {
 			});
 		}
 
+		let generatedFiles: ReadonlyArray<ApexVirtualFile>;
+		try {
+			generatedFiles = await workerClient.generate(sources);
+		} catch {
+			generatedFiles = generateApexVirtualFiles(this.workspaceRoot, sources);
+		}
+
 		const nextDefinitions = new Map<string, ApexVirtualFile>();
-		for (const file of await workerClient.generate(sources)) {
+		for (const file of generatedFiles) {
 			nextDefinitions.set(file.path, file);
 		}
 

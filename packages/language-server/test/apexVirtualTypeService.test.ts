@@ -77,9 +77,7 @@ describe("ApexVirtualTypeService", () => {
 
 			await service.initialize();
 
-			await waitFor(() => {
-				return payloads.length >= 2 ? true : undefined;
-			});
+			await waitFor(() => (payloads.length >= 2 ? true : undefined));
 
 			const latestPayload = payloads.at(-1);
 			const firstPayload = payloads[0];
@@ -288,9 +286,7 @@ describe("ApexVirtualTypeService", () => {
 }`,
 			);
 
-			await waitFor(() => {
-				return notifications.length >= 2 ? true : undefined;
-			});
+			await waitFor(() => (notifications.length >= 2 ? true : undefined));
 			const latestNotification = notifications.at(-1) as
 				| { files: Array<{ moduleName: string; content: string }> }
 				| undefined;
