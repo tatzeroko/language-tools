@@ -3,19 +3,18 @@ import { decorateLanguageService } from "./language-service";
 import { findSalesforceWorkspaceRoot } from "./lib/salesforce";
 import {
 	type ApexDefinitionFile,
-	buildApexStateSnapshot as buildApexStateSnapshotImpl,
-	isApexUpdateRequest,
 	resolveApexModulePath,
 } from "./lib/salesforce/apex";
-import { getRequestPayload, hasEquivalentProjectCounterpart } from "./lib/ts";
-import { loadFile, unloadFile } from "./lib/ts/file";
+import { applyWorkspaceApexFiles } from "./lib/salesforce/workspace";
+import { setupSessionHandlers } from "./lib/session-handler";
+import { hasEquivalentProjectCounterpart } from "./lib/ts";
+import { loadFile } from "./lib/ts/file";
 import ProjectContext from "./projectContext";
 import WorkspaceContext from "./workspaceContext";
 
 function init(modules: { typescript: typeof ts }) {
 	const { typescript } = modules;
 
-	const handledSessions = new WeakSet<ts.server.Session>();
 	const apexDefinitionsByWorkspace = new Map<
 		string,
 		ReadonlyArray<ApexDefinitionFile>
@@ -39,7 +38,12 @@ function init(modules: { typescript: typeof ts }) {
 			return info.languageService;
 		}
 
-		setupSessionHandlers(info.session);
+		setupSessionHandlers(info.session, {
+			typescript,
+			apexDefinitionsByWorkspace,
+			applyWorkspaceApexFiles: (ws) =>
+				applyWorkspaceApexFiles(typescript, apexDefinitionsByWorkspace, ws),
+		});
 
 		const workspaceCtx = WorkspaceContext.getOrCreate(workspace);
 		const existingContext = ProjectContext.get(workspace, info.project);
@@ -47,7 +51,11 @@ function init(modules: { typescript: typeof ts }) {
 			existingContext ??
 			new ProjectContext(workspaceCtx, info.project, info.languageServiceHost);
 		if (!existingContext) {
-			applyWorkspaceApexFiles(workspace);
+			applyWorkspaceApexFiles(
+				typescript,
+				apexDefinitionsByWorkspace,
+				workspace,
+			);
 		}
 
 		return decorateLanguageService(
@@ -64,95 +72,6 @@ function init(modules: { typescript: typeof ts }) {
 		);
 	}
 
-	function setupSessionHandlers(session: ts.server.Session | undefined) {
-		if (!session || handledSessions.has(session)) return;
-		handledSessions.add(session);
-
-		const registerHandler = (
-			command: string,
-			handler: (
-				request: ts.server.protocol.Request,
-			) => ts.server.HandlerResponse,
-		) => {
-			try {
-				session.addProtocolHandler(command, handler);
-			} catch {
-				return;
-			}
-		};
-
-		registerHandler("_tatzeroko/updateApexTypes", (request) => {
-			const payload = getRequestPayload(request);
-			if (
-				!isApexUpdateRequest(payload) ||
-				!payload.workspace ||
-				!payload.files
-			) {
-				return { response: { success: false } };
-			}
-
-			const normalizedWorkspace = typescript.server.toNormalizedPath(
-				payload.workspace,
-			);
-			const files = payload.files.filter(
-				(file): file is ApexDefinitionFile =>
-					!!file &&
-					typeof file.path === "string" &&
-					typeof file.content === "string" &&
-					typeof file.moduleName === "string",
-			);
-			const wsCtx =
-				WorkspaceContext.resolve(normalizedWorkspace) ??
-				WorkspaceContext.getOrCreate(normalizedWorkspace);
-			const canonical = wsCtx.workspace;
-			apexDefinitionsByWorkspace.set(canonical, files);
-			applyWorkspaceApexFiles(canonical);
-			return {
-				response: buildApexStateSnapshot(normalizedWorkspace),
-				responseRequired: true,
-			};
-		});
-	}
-
-	function applyWorkspaceApexFiles(workspace: string) {
-		const wsCtx =
-			WorkspaceContext.resolve(workspace) ??
-			WorkspaceContext.getOrCreate(workspace);
-		const canonical = wsCtx.workspace;
-
-		const definitions = apexDefinitionsByWorkspace.get(canonical) ?? [];
-		const nextPaths = new Set(definitions.map((definition) => definition.path));
-		const oldPaths = new Set(wsCtx.vfs.list());
-
-		for (const oldPath of oldPaths) {
-			if (!nextPaths.has(oldPath)) {
-				wsCtx.vfs.delete(oldPath);
-			}
-		}
-		for (const definition of definitions) {
-			wsCtx.vfs.set(definition.path, definition.content);
-		}
-
-		ProjectContext.forEachMatchingWorkspace(canonical, (_, ctx) => {
-			for (const oldPath of oldPaths) {
-				if (!nextPaths.has(oldPath)) {
-					unloadFile(typescript, ctx.project, oldPath);
-				}
-			}
-			for (const definition of definitions) {
-				loadFile(typescript, ctx.project, definition.path, definition.content);
-			}
-			ctx.project.updateGraph();
-		});
-	}
-
-	const buildApexStateSnapshot = (workspace?: string) =>
-		buildApexStateSnapshotImpl(
-			typescript,
-			apexDefinitionsByWorkspace,
-			workspace,
-		);
-
 	function getExternalFiles(project: ts.server.Project) {
 		const rawWorkspace = findSalesforceWorkspaceRoot(
 			typescript,
@@ -162,9 +81,8 @@ function init(modules: { typescript: typeof ts }) {
 			return [];
 		}
 		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
-
-		const files: string[] = [];
 		const definitions = apexDefinitionsByWorkspace.get(workspace) ?? [];
+		const files: string[] = [];
 		for (const definition of definitions) {
 			loadFile(typescript, project, definition.path, definition.content);
 			files.push(typescript.server.toNormalizedPath(definition.path));
