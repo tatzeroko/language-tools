@@ -22,3 +22,19 @@ export function hasEquivalentProjectCounterpart(
 
 	return typescript.sys.fileExists(counterpart);
 }
+
+export function getProjectRootPath(project: ts.server.Project) {
+	const candidate = project as { projectRootPath?: unknown };
+	return typeof candidate.projectRootPath === "string"
+		? candidate.projectRootPath
+		: null;
+}
+
+export function getRequestPayload(
+	request: ts.server.protocol.Request,
+): unknown {
+	const candidate = Array.isArray(request.arguments)
+		? request.arguments[0]
+		: request.arguments;
+	return candidate;
+}
