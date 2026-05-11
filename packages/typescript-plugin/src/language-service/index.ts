@@ -90,18 +90,8 @@ function decorateLanguageServiceHost(
 		};
 	};
 
-	const ensurePlaceholderVirtualFile = (normalizedPath: string) => {
+	const registerScriptInfo = (normalizedPath: string, content: string) => {
 		const normalizedVirtualPath = toNormalizedPath(typescript, normalizedPath);
-		if (vfs.has(normalizedPath)) {
-			return;
-		}
-		const fileName = path.basename(normalizedPath, ".d.ts");
-		const [, methodName] = fileName.split(".");
-		if (!methodName) {
-			return;
-		}
-		const content = `export default function ${methodName}(params: unknown): Promise<unknown>;`;
-		vfs.set(normalizedPath, content);
 		const scriptInfo = projectService.getOrCreateScriptInfoForNormalizedPath(
 			normalizedVirtualPath,
 			true,
@@ -112,6 +102,22 @@ function decorateLanguageServiceHost(
 				project.addRoot(scriptInfo);
 			} catch {}
 		}
+	};
+
+	const ensurePlaceholderVirtualFile = (normalizedPath: string) => {
+		const existing = vfs.get(normalizedPath);
+		if (existing) {
+			registerScriptInfo(normalizedPath, existing.buffer.toString("utf8"));
+			return;
+		}
+		const fileName = path.basename(normalizedPath, ".d.ts");
+		const [, methodName] = fileName.split(".");
+		if (!methodName) {
+			return;
+		}
+		const content = `export default function ${methodName}(params: unknown): Promise<unknown>;`;
+		vfs.set(normalizedPath, content);
+		registerScriptInfo(normalizedPath, content);
 	};
 
 	host.getScriptFileNames = () => {

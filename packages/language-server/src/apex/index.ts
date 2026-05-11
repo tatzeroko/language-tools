@@ -34,6 +34,7 @@ export class ApexVirtualTypeService {
 	private generationTicket = 0;
 	private workspaceRevision = 0;
 	private workspaceWatcherMode: "recursive" | "directories" | "none" = "none";
+	private hasRealDefinitions = false;
 	private disposed = false;
 
 	constructor(
@@ -205,7 +206,10 @@ export class ApexVirtualTypeService {
 		const placeholderMap = new Map(
 			placeholderDefinitions.map((definition) => [definition.path, definition]),
 		);
-		if (!this.definitionsAreEqual(this.definitions, placeholderMap)) {
+		if (
+			!this.hasRealDefinitions &&
+			!this.definitionsAreEqual(this.definitions, placeholderMap)
+		) {
 			this.definitions.clear();
 			for (const [filePath, definition] of placeholderMap) {
 				this.definitions.set(filePath, definition);
@@ -233,12 +237,15 @@ export class ApexVirtualTypeService {
 		}
 
 		if (this.definitionsAreEqual(this.definitions, nextDefinitions)) {
+			this.hasRealDefinitions = true;
 			return;
 		}
 		this.definitions.clear();
 		for (const [filePath, definition] of nextDefinitions) {
 			this.definitions.set(filePath, definition);
 		}
+
+		this.hasRealDefinitions = true;
 
 		const payload: ApexTypesPayload = {
 			workspace: this.workspaceRoot,

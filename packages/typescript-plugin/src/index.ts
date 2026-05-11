@@ -5,7 +5,7 @@ import { findSalesforceWorkspaceRoot } from "./lib/salesforce";
 import { hasEquivalentProjectCounterpart } from "./lib/ts";
 import { loadFile, unloadFile } from "./lib/ts/file";
 import ProjectContext from "./projectContext";
-import { VirtualFileStore } from "./vfs";
+import WorkspaceContext from "./workspaceContext";
 
 type ApexDefinitionFile = {
 	readonly path: string;
@@ -71,40 +71,24 @@ function init(modules: { typescript: typeof ts }) {
 
 		setupSessionHandlers(info.session);
 
+		const workspaceCtx = WorkspaceContext.getOrCreate(workspace);
 		const existingContext = ProjectContext.get(workspace, info.project);
 		const context =
 			existingContext ??
-			new ProjectContext(
-				workspace,
-				info.project,
-				info.languageServiceHost,
-				new VirtualFileStore(),
-			);
-		if (existingContext) {
-			return decorateLanguageService(
-				workspace,
-				typescript,
-				info.languageServiceHost,
-				info.languageService,
-				context.vfs,
-				info.project,
-				info.project.projectService,
-				() => {},
-				(moduleName: string) => resolveApexModulePath(workspace, moduleName),
-			);
+			new ProjectContext(workspaceCtx, info.project, info.languageServiceHost);
+		if (!existingContext) {
+			applyWorkspaceApexFiles(workspace);
 		}
-
-		applyWorkspaceApexFiles(workspace);
 
 		return decorateLanguageService(
 			workspace,
 			typescript,
 			info.languageServiceHost,
 			info.languageService,
-			context.vfs,
+			workspaceCtx.vfs,
 			info.project,
 			info.project.projectService,
-			() => context.dispose(),
+			existingContext ? () => {} : () => context.dispose(),
 			(moduleName: string) => resolveApexModulePath(workspace, moduleName),
 		);
 	}
@@ -146,8 +130,12 @@ function init(modules: { typescript: typeof ts }) {
 					typeof file.content === "string" &&
 					typeof file.moduleName === "string",
 			);
-			apexDefinitionsByWorkspace.set(normalizedWorkspace, files);
-			applyWorkspaceApexFiles(normalizedWorkspace);
+			const wsCtx =
+				WorkspaceContext.resolve(normalizedWorkspace) ??
+				WorkspaceContext.getOrCreate(normalizedWorkspace);
+			const canonical = wsCtx.workspace;
+			apexDefinitionsByWorkspace.set(canonical, files);
+			applyWorkspaceApexFiles(canonical);
 			return {
 				response: buildApexStateSnapshot(normalizedWorkspace),
 				responseRequired: true,
@@ -156,18 +144,31 @@ function init(modules: { typescript: typeof ts }) {
 	}
 
 	function applyWorkspaceApexFiles(workspace: string) {
-		const definitions = apexDefinitionsByWorkspace.get(workspace) ?? [];
+		const wsCtx =
+			WorkspaceContext.resolve(workspace) ??
+			WorkspaceContext.getOrCreate(workspace);
+		const canonical = wsCtx.workspace;
+
+		const definitions = apexDefinitionsByWorkspace.get(canonical) ?? [];
 		const nextPaths = new Set(definitions.map((definition) => definition.path));
-		ProjectContext.forEachMatchingWorkspace(workspace, (_, ctx) => {
-			const currentFiles = ctx.vfs.list();
-			for (const existingPath of currentFiles) {
-				if (!nextPaths.has(existingPath)) {
-					unloadFile(typescript, ctx.project, existingPath);
-					ctx.vfs.delete(existingPath);
+		const oldPaths = new Set(wsCtx.vfs.list());
+
+		for (const oldPath of oldPaths) {
+			if (!nextPaths.has(oldPath)) {
+				wsCtx.vfs.delete(oldPath);
+			}
+		}
+		for (const definition of definitions) {
+			wsCtx.vfs.set(definition.path, definition.content);
+		}
+
+		ProjectContext.forEachMatchingWorkspace(canonical, (_, ctx) => {
+			for (const oldPath of oldPaths) {
+				if (!nextPaths.has(oldPath)) {
+					unloadFile(typescript, ctx.project, oldPath);
 				}
 			}
 			for (const definition of definitions) {
-				ctx.vfs.set(definition.path, definition.content);
 				loadFile(typescript, ctx.project, definition.path, definition.content);
 			}
 			ctx.project.updateGraph();
@@ -203,11 +204,13 @@ function init(modules: { typescript: typeof ts }) {
 				scriptInfo: boolean;
 			}>;
 		}> = [];
-		const visitWorkspace = (ws: string) => {
-			ProjectContext.forEachMatchingWorkspace(ws, (_, ctx) => {
-				const vfsFiles = ctx.vfs.list();
+		const visitCanonicalWorkspace = (ws: string) => {
+			const wsCtx = WorkspaceContext.resolve(ws) ?? WorkspaceContext.get(ws);
+			const vfsFiles = wsCtx?.vfs.list() ?? [];
+			const canonical = wsCtx?.workspace ?? ws;
+			ProjectContext.forEachMatchingWorkspace(canonical, (_, ctx) => {
 				contexts.push({
-					workspace: ws,
+					workspace: canonical,
 					project: ctx.project.getCurrentDirectory(),
 					projectRootPath: getProjectRootPath(ctx.project),
 					vfs: vfsFiles,
@@ -225,10 +228,10 @@ function init(modules: { typescript: typeof ts }) {
 			});
 		};
 		if (workspace) {
-			visitWorkspace(workspace);
+			visitCanonicalWorkspace(workspace);
 		} else {
 			for (const ws of apexDefinitionsByWorkspace.keys()) {
-				visitWorkspace(ws);
+				visitCanonicalWorkspace(ws);
 			}
 		}
 		return {
@@ -259,9 +262,6 @@ function init(modules: { typescript: typeof ts }) {
 			const files: string[] = [];
 			const definitions = apexDefinitionsByWorkspace.get(workspace) ?? [];
 			for (const definition of definitions) {
-				ProjectContext.forEachMatchingWorkspace(workspace, (_, ctx) => {
-					ctx.vfs.set(definition.path, definition.content);
-				});
 				loadFile(typescript, project, definition.path, definition.content);
 				files.push(typescript.server.toNormalizedPath(definition.path));
 			}
