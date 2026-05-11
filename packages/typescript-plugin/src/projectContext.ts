@@ -1,5 +1,6 @@
 import type * as ts from "typescript/lib/tsserverlibrary";
 import type { VirtualFileStore } from "./vfs";
+import type WorkspaceContext from "./workspaceContext";
 
 export default class ProjectContext {
 	private static readonly workspaces = new Map<
@@ -56,22 +57,28 @@ export default class ProjectContext {
 		}
 	}
 
+	readonly workspaceCtx: WorkspaceContext;
+
 	constructor(
-		readonly workspace: string,
+		workspaceCtx: WorkspaceContext,
 		readonly project: ts.server.Project,
 		readonly host: ts.LanguageServiceHost,
-		readonly vfs: VirtualFileStore,
 	) {
-		ProjectContext.register(this.workspace, this.project, this);
+		this.workspaceCtx = workspaceCtx;
+		ProjectContext.register(workspaceCtx.workspace, project, this);
+		workspaceCtx.registerProject(project, this);
+	}
+
+	get vfs(): VirtualFileStore {
+		return this.workspaceCtx.vfs;
 	}
 
 	dispose() {
+		this.workspaceCtx.unregisterProject(this.project);
 		try {
-			ProjectContext.unregister(this.workspace, this.project);
+			ProjectContext.unregister(this.workspaceCtx.workspace, this.project);
 		} catch {
 			/** ignore errors during shutdown (e.g. project already disposed) */
 		}
-
-		this.vfs.clear();
 	}
 }

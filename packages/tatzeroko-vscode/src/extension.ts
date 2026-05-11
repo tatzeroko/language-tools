@@ -14,7 +14,9 @@ let outputChannel: vscode.OutputChannel | undefined;
 function resolveServerModule(context: vscode.ExtensionContext) {
 	try {
 		return require.resolve("@tatzeroko/language-server/server");
-	} catch {}
+	} catch {
+		/** ignore */
+	}
 
 	const bundled = path.join(
 		context.extensionUri.fsPath,
@@ -25,7 +27,9 @@ function resolveServerModule(context: vscode.ExtensionContext) {
 
 	try {
 		return require.resolve(bundled);
-	} catch {}
+	} catch {
+		/** ignore */
+	}
 
 	throw new Error("Could not resolve language server module");
 }
@@ -33,6 +37,7 @@ function resolveServerModule(context: vscode.ExtensionContext) {
 export async function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel("Tatzeroko");
 	outputChannel.appendLine("[tatzeroko] activating extension");
+
 	const serverModule = resolveServerModule(context);
 	const serverOptions: ServerOptions = {
 		run: {
@@ -62,7 +67,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	client.onNotification("tsserver/request", ([seq, command, args]) => {
 		void (async () => {
 			try {
-				if (command === "_tatzeroko/updateApexTypes") {
+				const isInternal = command.startsWith("_tatzeroko/");
+				if (isInternal) {
 					void Promise.resolve(
 						vscode.commands.executeCommand<{ body?: unknown } | undefined>(
 							"typescript.tsserverRequest",

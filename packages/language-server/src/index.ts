@@ -20,24 +20,22 @@ export const startServer = () => {
 
 	let seq = 0;
 	const tsserverRequestHandlers = new Map<number, (res: unknown) => void>();
-	let apexService: ApexVirtualTypeService | undefined;
 
-	const dispatchToTsserver = (payload: ApexTypesPayload) => {
+	const dispatchToTsserver = (message: string, payload: ApexTypesPayload) => {
 		const id = ++seq;
-		connection.sendNotification("tsserver/request", [
-			id,
-			"_tatzeroko/updateApexTypes",
-			[payload],
-		]);
+		connection.sendNotification("tsserver/request", [id, message, [payload]]);
 		return Promise.resolve(null);
 	};
 
+	let apexService: ApexVirtualTypeService | undefined;
+
 	connection.onInitialize((params: InitializeParams): InitializeResult => {
 		const workspaceRoot = resolveWorkspaceRoot(params);
+
 		apexService = new ApexVirtualTypeService(
 			connection,
 			workspaceRoot,
-			dispatchToTsserver,
+			(payload) => dispatchToTsserver("_tatzeroko/updateApexTypes", payload),
 		);
 		void apexService.initialize().catch(() => {});
 
@@ -48,13 +46,21 @@ export const startServer = () => {
 		};
 	});
 
-	connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams) => {
-		void apexService?.handleWatchedFiles(params);
-	});
-
 	connection.onShutdown(() => {
 		apexService?.dispose();
 		apexService = undefined;
+	});
+
+	connection.onNotification(
+		"tsserver/response",
+		([id, res]: [number, unknown]) => {
+			tsserverRequestHandlers.get(id)?.(res);
+			tsserverRequestHandlers.delete(id);
+		},
+	);
+
+	connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams) => {
+		void apexService?.handleWatchedFiles(params);
 	});
 
 	documents.onDidChangeContent((event) => {
@@ -70,14 +76,6 @@ export const startServer = () => {
 			event.document.getText(),
 		);
 	});
-
-	connection.onNotification(
-		"tsserver/response",
-		([id, res]: [number, unknown]) => {
-			tsserverRequestHandlers.get(id)?.(res);
-			tsserverRequestHandlers.delete(id);
-		},
-	);
 
 	documents.listen(connection);
 	connection.listen();

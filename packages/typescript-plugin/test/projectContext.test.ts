@@ -2,22 +2,27 @@ import * as typescript from "typescript/lib/tsserverlibrary";
 import { describe, expect, it } from "vitest";
 
 import ProjectContext from "../src/projectContext";
-import { VirtualFileStore } from "../src/vfs";
+import WorkspaceContext from "../src/workspaceContext";
 
 describe("ProjectContext", () => {
 	it("matches exact and nested workspace roots", () => {
 		const host = {} as typescript.LanguageServiceHost;
-		const parent = new ProjectContext(
+		const parentWsCtx = WorkspaceContext.getOrCreate(
 			typescript.server.toNormalizedPath("/workspace"),
+		);
+		const parent = new ProjectContext(
+			parentWsCtx,
 			{} as typescript.server.Project,
 			host,
-			new VirtualFileStore(),
+		);
+
+		const childWsCtx = WorkspaceContext.getOrCreate(
+			typescript.server.toNormalizedPath("/workspace/sub"),
 		);
 		const child = new ProjectContext(
-			typescript.server.toNormalizedPath("/workspace/sub"),
+			childWsCtx,
 			{} as typescript.server.Project,
 			host,
-			new VirtualFileStore(),
 		);
 
 		try {
@@ -25,7 +30,7 @@ describe("ProjectContext", () => {
 			ProjectContext.forEachMatchingWorkspace(
 				typescript.server.toNormalizedPath("/workspace"),
 				(workspace, ctx) => {
-					parentMatches.push(`${workspace}:${ctx.workspace}`);
+					parentMatches.push(`${workspace}:${ctx.workspaceCtx.workspace}`);
 				},
 			);
 
@@ -38,7 +43,7 @@ describe("ProjectContext", () => {
 			ProjectContext.forEachMatchingWorkspace(
 				typescript.server.toNormalizedPath("/workspace/sub"),
 				(workspace, ctx) => {
-					childMatches.push(`${workspace}:${ctx.workspace}`);
+					childMatches.push(`${workspace}:${ctx.workspaceCtx.workspace}`);
 				},
 			);
 
@@ -54,17 +59,22 @@ describe("ProjectContext", () => {
 
 	it("matches normalized windows-style workspace roots", () => {
 		const host = {} as typescript.LanguageServiceHost;
-		const parent = new ProjectContext(
+		const parentWsCtx = WorkspaceContext.getOrCreate(
 			typescript.server.toNormalizedPath("C:\\workspace"),
+		);
+		const parent = new ProjectContext(
+			parentWsCtx,
 			{} as typescript.server.Project,
 			host,
-			new VirtualFileStore(),
+		);
+
+		const childWsCtx = WorkspaceContext.getOrCreate(
+			typescript.server.toNormalizedPath("C:\\workspace\\sub"),
 		);
 		const child = new ProjectContext(
-			typescript.server.toNormalizedPath("C:\\workspace\\sub"),
+			childWsCtx,
 			{} as typescript.server.Project,
 			host,
-			new VirtualFileStore(),
 		);
 
 		try {
@@ -72,7 +82,7 @@ describe("ProjectContext", () => {
 			ProjectContext.forEachMatchingWorkspace(
 				typescript.server.toNormalizedPath("C:\\workspace"),
 				(workspace, ctx) => {
-					matches.push(`${workspace}:${ctx.workspace}`);
+					matches.push(`${workspace}:${ctx.workspaceCtx.workspace}`);
 				},
 			);
 
