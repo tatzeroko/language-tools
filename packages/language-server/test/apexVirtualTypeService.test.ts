@@ -2,8 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ApexVirtualTypeService } from "../src/apex";
-import { generateApexVirtualFiles } from "../src/apex-generator";
-import { ApexWorkerClient } from "../src/apex-worker-client";
+import { generateApexVirtualFiles } from "../src/apex/apex-generator";
+import { ApexWorkerClient } from "../src/apex/apex-worker-client";
 
 type ApexPayload = {
 	workspace: string;

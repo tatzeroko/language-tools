@@ -1,98 +1,78 @@
 import * as typescript from "typescript/lib/tsserverlibrary";
 import { describe, expect, it } from "vitest";
 
-import ProjectContext from "../src/projectContext";
 import WorkspaceContext from "../src/workspaceContext";
 
-describe("ProjectContext", () => {
+describe("WorkspaceContext project registration", () => {
 	it("matches exact and nested workspace roots", () => {
 		const host = {} as typescript.LanguageServiceHost;
+		const parentProject = {} as typescript.server.Project;
+		const childProject = {} as typescript.server.Project;
+
 		const parentWsCtx = WorkspaceContext.getOrCreate(
 			typescript.server.toNormalizedPath("/workspace"),
 		);
-		const parent = new ProjectContext(
-			parentWsCtx,
-			{} as typescript.server.Project,
-			host,
-		);
+		parentWsCtx.registerProject(parentProject, host);
 
 		const childWsCtx = WorkspaceContext.getOrCreate(
 			typescript.server.toNormalizedPath("/workspace/sub"),
 		);
-		const child = new ProjectContext(
-			childWsCtx,
-			{} as typescript.server.Project,
-			host,
-		);
+		childWsCtx.registerProject(childProject, host);
 
 		try {
 			const parentMatches: string[] = [];
-			ProjectContext.forEachMatchingWorkspace(
+			WorkspaceContext.forEachMatchingWorkspace(
 				typescript.server.toNormalizedPath("/workspace"),
-				(workspace, ctx) => {
-					parentMatches.push(`${workspace}:${ctx.workspaceCtx.workspace}`);
+				(workspace) => {
+					parentMatches.push(workspace);
 				},
 			);
 
-			expect(parentMatches).toEqual([
-				"/workspace:/workspace",
-				"/workspace/sub:/workspace/sub",
-			]);
+			expect(parentMatches).toEqual(["/workspace", "/workspace/sub"]);
 
 			const childMatches: string[] = [];
-			ProjectContext.forEachMatchingWorkspace(
+			WorkspaceContext.forEachMatchingWorkspace(
 				typescript.server.toNormalizedPath("/workspace/sub"),
-				(workspace, ctx) => {
-					childMatches.push(`${workspace}:${ctx.workspaceCtx.workspace}`);
+				(workspace) => {
+					childMatches.push(workspace);
 				},
 			);
 
-			expect(childMatches).toEqual([
-				"/workspace:/workspace",
-				"/workspace/sub:/workspace/sub",
-			]);
+			expect(childMatches).toEqual(["/workspace", "/workspace/sub"]);
 		} finally {
-			parent.dispose();
-			child.dispose();
+			parentWsCtx.unregisterProject(parentProject);
+			childWsCtx.unregisterProject(childProject);
 		}
 	});
 
 	it("matches normalized windows-style workspace roots", () => {
 		const host = {} as typescript.LanguageServiceHost;
+		const parentProject = {} as typescript.server.Project;
+		const childProject = {} as typescript.server.Project;
+
 		const parentWsCtx = WorkspaceContext.getOrCreate(
 			typescript.server.toNormalizedPath("C:\\workspace"),
 		);
-		const parent = new ProjectContext(
-			parentWsCtx,
-			{} as typescript.server.Project,
-			host,
-		);
+		parentWsCtx.registerProject(parentProject, host);
 
 		const childWsCtx = WorkspaceContext.getOrCreate(
 			typescript.server.toNormalizedPath("C:\\workspace\\sub"),
 		);
-		const child = new ProjectContext(
-			childWsCtx,
-			{} as typescript.server.Project,
-			host,
-		);
+		childWsCtx.registerProject(childProject, host);
 
 		try {
 			const matches: string[] = [];
-			ProjectContext.forEachMatchingWorkspace(
+			WorkspaceContext.forEachMatchingWorkspace(
 				typescript.server.toNormalizedPath("C:\\workspace"),
-				(workspace, ctx) => {
-					matches.push(`${workspace}:${ctx.workspaceCtx.workspace}`);
+				(workspace) => {
+					matches.push(workspace);
 				},
 			);
 
-			expect(matches).toEqual([
-				"C:/workspace:C:/workspace",
-				"C:/workspace/sub:C:/workspace/sub",
-			]);
+			expect(matches).toEqual(["C:/workspace", "C:/workspace/sub"]);
 		} finally {
-			parent.dispose();
-			child.dispose();
+			parentWsCtx.unregisterProject(parentProject);
+			childWsCtx.unregisterProject(childProject);
 		}
 	});
 });

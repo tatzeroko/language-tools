@@ -1,9 +1,8 @@
 import path from "node:path";
 import type * as ts from "typescript/lib/tsserverlibrary";
-import ProjectContext from "../projectContext";
-import type { VirtualFileStore } from "../vfs";
-
-type ApexModuleResolver = (moduleName: string) => string | undefined;
+import { resolveApexModulePath } from "../lib/salesforce/apex";
+import type { VirtualFileStore } from "../lib/vfs";
+import WorkspaceContext from "../workspaceContext";
 
 function toNormalizedPath(typescript: typeof ts, fileName: string) {
 	return typescript.server.toNormalizedPath(
@@ -23,7 +22,6 @@ export function decorateLanguageService(
 		"getOrCreateScriptInfoForNormalizedPath"
 	>,
 	dispose: () => void,
-	resolveApexModule?: ApexModuleResolver,
 ) {
 	decorateLanguageServiceHost(
 		workspace,
@@ -32,18 +30,13 @@ export function decorateLanguageService(
 		vfs,
 		project,
 		projectService,
-		resolveApexModule,
 	);
 	decorateLanguageServiceInner(ls, dispose);
 	return ls;
 }
 
-function isSalesforceGeneratedApexTypings(normalizedPath: string) {
-	return normalizedPath.includes("/.sfdx/typings/lwc/apex/");
-}
-
 function shouldIgnoreApexTyping(normalizedPath: string) {
-	return isSalesforceGeneratedApexTypings(normalizedPath);
+	return normalizedPath.includes("/.sfdx/typings/lwc/apex/");
 }
 
 function decorateLanguageServiceHost(
@@ -56,7 +49,6 @@ function decorateLanguageServiceHost(
 		ts.server.ProjectService,
 		"getOrCreateScriptInfoForNormalizedPath"
 	>,
-	resolveApexModule?: ApexModuleResolver,
 ) {
 	const orig = {
 		getScriptFileNames: host.getScriptFileNames?.bind(host),
@@ -70,15 +62,12 @@ function decorateLanguageServiceHost(
 		resolveModuleNameLiterals: host.resolveModuleNameLiterals?.bind(host),
 	};
 
-	const resolveApexModulePath = (moduleName: string) => {
-		if (!resolveApexModule) {
-			return undefined;
-		}
-		return resolveApexModule(moduleName);
-	};
-
 	const createApexResolvedModule = (moduleName: string) => {
-		const resolvedFileName = resolveApexModulePath(moduleName);
+		const resolvedFileName = resolveApexModulePath(
+			typescript,
+			workspace,
+			moduleName,
+		);
 		if (!resolvedFileName) {
 			return undefined;
 		}
@@ -234,34 +223,37 @@ function decorateLanguageServiceHost(
 			let resolutionResult:
 				| ts.ResolvedModuleWithFailedLookupLocations
 				| undefined;
-			ProjectContext.forEachMatchingWorkspace(workspace, (_, ctx) => {
-				if (resolutionResult) return;
-				const componentFolder = path.join(
-					ctx.project.getCurrentDirectory(),
-					componentName,
-				);
-				const extensions = {
-					".d.ts": typescript.Extension.Dts,
-					".ts": typescript.Extension.Ts,
-					".js": typescript.Extension.Js,
-				};
-
-				for (const [ext, extension] of Object.entries(extensions)) {
-					const candidate = path.join(
-						componentFolder,
-						`${componentName}${ext}`,
+			WorkspaceContext.forEachMatchingWorkspace(
+				workspace,
+				(_, project, host) => {
+					if (resolutionResult) return;
+					const componentFolder = path.join(
+						project.getCurrentDirectory(),
+						componentName,
 					);
-					if (ctx.host.fileExists?.(candidate)) {
-						resolutionResult = {
-							resolvedModule: {
-								extension,
-								resolvedFileName: toNormalizedPath(typescript, candidate),
-							},
-						};
-						return;
+					const extensions = {
+						".d.ts": typescript.Extension.Dts,
+						".ts": typescript.Extension.Ts,
+						".js": typescript.Extension.Js,
+					};
+
+					for (const [ext, extension] of Object.entries(extensions)) {
+						const candidate = path.join(
+							componentFolder,
+							`${componentName}${ext}`,
+						);
+						if (host.fileExists?.(candidate)) {
+							resolutionResult = {
+								resolvedModule: {
+									extension,
+									resolvedFileName: toNormalizedPath(typescript, candidate),
+								},
+							};
+							return;
+						}
 					}
-				}
-			});
+				},
+			);
 			if (resolutionResult) return resolutionResult;
 
 			return resolution;
@@ -283,10 +275,7 @@ function decorateLanguageServiceHost(
 			return createApexResolvedModule(moduleName);
 		});
 		if (apexResolutions.some(Boolean)) {
-			return apexResolutions.map((resolution, _index) => {
-				if (resolution) return resolution;
-				return undefined;
-			});
+			return apexResolutions;
 		}
 
 		const literals = moduleNames.map((text) =>

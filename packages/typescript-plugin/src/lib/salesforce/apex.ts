@@ -1,8 +1,5 @@
 import path from "node:path";
 import type * as ts from "typescript/lib/tsserverlibrary";
-import ProjectContext from "../../projectContext";
-import WorkspaceContext from "../../workspaceContext";
-import { getProjectRootPath } from "../ts";
 
 export type ApexDefinitionFile = {
 	readonly path: string;
@@ -45,69 +42,4 @@ export function isApexUpdateRequest(
 			typeof candidate.workspace === "string") &&
 		(candidate.files === undefined || Array.isArray(candidate.files))
 	);
-}
-
-export function buildApexStateSnapshot(
-	typescript: typeof ts,
-	apexDefinitionsByWorkspace: ReadonlyMap<
-		string,
-		ReadonlyArray<ApexDefinitionFile>
-	>,
-	workspace?: string,
-) {
-	type ContextEntry = {
-		workspace: string;
-		project: string;
-		projectRootPath: string | null;
-		vfs: string[];
-		openFiles: string[];
-		contains: Array<{
-			path: string;
-			containsFile: boolean;
-			scriptInfo: boolean;
-		}>;
-	};
-	const contexts: ContextEntry[] = [];
-	const visitCanonicalWorkspace = (ws: string) => {
-		const wsCtx = WorkspaceContext.resolve(ws) ?? WorkspaceContext.get(ws);
-		const vfsFiles = wsCtx?.vfs.list() ?? [];
-		const canonical = wsCtx?.workspace ?? ws;
-		ProjectContext.forEachMatchingWorkspace(canonical, (_, ctx) => {
-			contexts.push({
-				workspace: canonical,
-				project: ctx.project.getCurrentDirectory(),
-				projectRootPath: getProjectRootPath(ctx.project),
-				vfs: vfsFiles,
-				openFiles: Array.from(ctx.project.projectService.openFiles.keys()),
-				contains: vfsFiles.map((file) => {
-					const normalizedFile = typescript.server.toNormalizedPath(file);
-					return {
-						path: normalizedFile,
-						containsFile: ctx.project.containsFile(normalizedFile),
-						scriptInfo:
-							!!ctx.project.projectService.getScriptInfo(normalizedFile),
-					};
-				}),
-			});
-		});
-	};
-	if (workspace) {
-		visitCanonicalWorkspace(workspace);
-	} else {
-		for (const ws of apexDefinitionsByWorkspace.keys()) {
-			visitCanonicalWorkspace(ws);
-		}
-	}
-	return {
-		success: true,
-		workspace: workspace ?? null,
-		definitions: Array.from(apexDefinitionsByWorkspace.entries()).map(
-			([ws, files]) => ({
-				workspace: ws,
-				count: files.length,
-				paths: files.map((file) => file.path),
-			}),
-		),
-		contexts,
-	};
 }
