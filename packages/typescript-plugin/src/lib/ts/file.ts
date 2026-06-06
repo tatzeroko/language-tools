@@ -22,14 +22,6 @@ type ScriptInfoWithContent = ts.server.ScriptInfo & {
 	editContent?: (start: number, end: number, newText: string) => void;
 };
 
-/**
- * Loads or refreshes a file in the given TypeScript project.
- *
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param project The TypeScript server project instance.
- * @param path The file path to load.
- * @param content Optional file content. When omitted, the file is read from the project host.
- */
 export function loadFile(
 	typescript: typeof ts,
 	project: LoadableProject,
@@ -69,13 +61,6 @@ export function loadFile(
 	} catch {}
 }
 
-/**
- * Unloads a file from the given TypeScript project if it is present.
- *
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param project The TypeScript server project instance.
- * @param path The file path to unload.
- */
 export function unloadFile(
 	typescript: typeof ts,
 	project: UnloadableProject,

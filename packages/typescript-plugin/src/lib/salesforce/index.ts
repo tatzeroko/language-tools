@@ -1,21 +1,9 @@
 import type ts from "typescript/lib/tsserverlibrary";
 
 /**
- * Locates the root directory of a Salesforce (SFDX / SF) workspace.
- *
- * @description
- * Traverses upward from the given `startDir`, looking for any of the following
- * well-known Salesforce workspace markers:
- *
- * - `sfdx-project.json` – legacy SFDX project root
- * - `.sf/` – new Salesforce CLI workspace root
- * - `.sfdx/` – legacy Salesforce CLI workspace root
- *
- * Stops at the filesystem root if no markers are found.
- *
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param startDir The starting directory for the upward search.
- * @returns The resolved path to the Salesforce workspace root, or `undefined` if not found.
+ * Walks upward from `startDir` looking for Salesforce workspace markers
+ * (`sfdx-project.json`, `.sf/`, `.sfdx/`). Returns the first matching
+ * directory, or `undefined` if none is found before the filesystem root.
  */
 export function findSalesforceWorkspaceRoot(
 	typescript: typeof ts,
@@ -48,22 +36,4 @@ export function findSalesforceWorkspaceRoot(
 	}
 
 	return undefined;
-}
-
-/**
- * Determines whether a TypeScript project belongs to a Salesforce (SFDX / SF) workspace.
- * Internally calls {@link findSalesforceWorkspaceRoot} to detect workspace markers.
- *
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param project The TypeScript server project instance.
- * @returns `true` if a Salesforce workspace root is found; otherwise `false`.
- */
-export function isSalesforceWorkspace(
-	typescript: typeof ts,
-	project: ts.server.Project,
-) {
-	return !!findSalesforceWorkspaceRoot(
-		typescript,
-		project.getCurrentDirectory(),
-	);
 }

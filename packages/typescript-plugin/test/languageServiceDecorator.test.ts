@@ -4,7 +4,7 @@ import type * as ts from "typescript/lib/tsserverlibrary";
 import * as typescript from "typescript/lib/tsserverlibrary";
 import { describe, expect, it } from "vitest";
 import { decorateLanguageService } from "../src/language-service";
-import { VirtualFileStore } from "../src/vfs";
+import { VirtualFileStore } from "../src/lib/vfs";
 
 const virtualContent = `/**
  * Finds contacts matching the query.
@@ -81,10 +81,6 @@ describe("language-service decorator", () => {
 				{ addRoot: () => undefined },
 				{ getOrCreateScriptInfoForNormalizedPath: () => undefined },
 				() => ls.dispose(),
-				(moduleName) =>
-					moduleName === "@salesforce/apex/ContactController.search"
-						? normalized
-						: undefined,
 			);
 
 			expect(host.getScriptFileNames()).toContain(normalized);
@@ -162,10 +158,6 @@ describe("language-service decorator", () => {
 				{ addRoot: () => undefined },
 				{ getOrCreateScriptInfoForNormalizedPath: () => undefined },
 				() => ls.dispose(),
-				(moduleName) =>
-					moduleName === "@salesforce/apex/ContactController.search"
-						? normalized
-						: undefined,
 			);
 
 			const quickInfo = ls.getQuickInfoAtPosition(

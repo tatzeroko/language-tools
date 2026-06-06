@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { VirtualFileStore } from "../src/vfs";
+import { VirtualFileStore } from "../src/lib/vfs";
 
 describe("VirtualFileStore", () => {
 	it("stores buffers and versions", () => {
@@ -15,6 +15,9 @@ describe("VirtualFileStore", () => {
 		const updated = vfs.get("/workspace/file.d.ts");
 		expect(updated?.buffer.toString("utf8")).toBe("two");
 		expect(updated?.version).toBe(2);
+
+		vfs.set("/workspace/file.d.ts", "two");
+		expect(vfs.get("/workspace/file.d.ts")?.version).toBe(2);
 	});
 
 	it("matches directory prefixes without scanning twice", () => {

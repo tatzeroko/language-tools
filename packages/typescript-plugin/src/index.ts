@@ -1,24 +1,13 @@
 import type * as ts from "typescript/lib/tsserverlibrary";
 import { decorateLanguageService } from "./language-service";
 import { findSalesforceWorkspaceRoot } from "./lib/salesforce";
-import {
-	type ApexDefinitionFile,
-	resolveApexModulePath,
-} from "./lib/salesforce/apex";
-import { applyWorkspaceApexFiles } from "./lib/salesforce/workspace";
-import { setupSessionHandlers } from "./lib/session-handler";
 import { hasEquivalentProjectCounterpart } from "./lib/ts";
 import { loadFile } from "./lib/ts/file";
-import ProjectContext from "./projectContext";
+import { setupSessionHandlers } from "./session-handler";
 import WorkspaceContext from "./workspaceContext";
 
 function init(modules: { typescript: typeof ts }) {
 	const { typescript } = modules;
-
-	const apexDefinitionsByWorkspace = new Map<
-		string,
-		ReadonlyArray<ApexDefinitionFile>
-	>();
 
 	function create(info: ts.server.PluginCreateInfo) {
 		const rawWorkspace = findSalesforceWorkspaceRoot(
@@ -38,24 +27,13 @@ function init(modules: { typescript: typeof ts }) {
 			return info.languageService;
 		}
 
-		setupSessionHandlers(info.session, {
-			typescript,
-			apexDefinitionsByWorkspace,
-			applyWorkspaceApexFiles: (ws) =>
-				applyWorkspaceApexFiles(typescript, apexDefinitionsByWorkspace, ws),
-		});
+		setupSessionHandlers(info.session, typescript);
 
 		const workspaceCtx = WorkspaceContext.getOrCreate(workspace);
-		const existingContext = ProjectContext.get(workspace, info.project);
-		const context =
-			existingContext ??
-			new ProjectContext(workspaceCtx, info.project, info.languageServiceHost);
-		if (!existingContext) {
-			applyWorkspaceApexFiles(
-				typescript,
-				apexDefinitionsByWorkspace,
-				workspace,
-			);
+		const isNew = !workspaceCtx.hasProject(info.project);
+		workspaceCtx.registerProject(info.project, info.languageServiceHost);
+		if (isNew) {
+			workspaceCtx.setDefinitions(typescript, workspaceCtx.definitions);
 		}
 
 		return decorateLanguageService(
@@ -66,9 +44,7 @@ function init(modules: { typescript: typeof ts }) {
 			workspaceCtx.vfs,
 			info.project,
 			info.project.projectService,
-			existingContext ? () => {} : () => context.dispose(),
-			(moduleName: string) =>
-				resolveApexModulePath(typescript, workspace, moduleName),
+			() => workspaceCtx.unregisterProject(info.project),
 		);
 	}
 
@@ -81,7 +57,7 @@ function init(modules: { typescript: typeof ts }) {
 			return [];
 		}
 		const workspace = typescript.server.toNormalizedPath(rawWorkspace);
-		const definitions = apexDefinitionsByWorkspace.get(workspace) ?? [];
+		const definitions = WorkspaceContext.resolve(workspace)?.definitions ?? [];
 		const files: string[] = [];
 		for (const definition of definitions) {
 			loadFile(typescript, project, definition.path, definition.content);

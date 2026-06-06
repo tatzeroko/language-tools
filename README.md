@@ -14,10 +14,8 @@ with deeper Salesforce-specific type intelligence planned for future releases.
 - Integration with TypeScript and editor tooling (via TS plugin and language server)
 - Custom file and module resolution for Salesforce project layouts
 - Virtual file support for generated and inferred sources
-
-> [!WARNING]
-> Apex-aware types, Salesforce metadata integration, and org-based type inference
-are planned, but not yet implemented.
+- **Apex virtual `.d.ts` generation** — parses `@AuraEnabled` methods in Apex classes and generates TypeScript declaration files for type-safe LWC development
+- **TypeScript module resolution** for `@salesforce/apex/*` modules and LWC `c/*` components
 
 ## 📦 Monorepo structure
 
