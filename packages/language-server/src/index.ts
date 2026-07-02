@@ -1,5 +1,6 @@
 import {
 	createConnection,
+	type DidChangeWatchedFilesParams,
 	type InitializeParams,
 	type InitializeResult,
 	ProposedFeatures,
@@ -8,7 +9,9 @@ import {
 } from "vscode-languageserver/node";
 
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { type ApexTypesPayload, ApexVirtualTypeService } from "./apex";
 
+/** Starts the Tatzeroko language server. */
 export const startServer = () => {
 	const connection = createConnection(ProposedFeatures.all);
 	const documents: TextDocuments<TextDocument> = new TextDocuments(
@@ -16,19 +19,26 @@ export const startServer = () => {
 	);
 
 	let seq = 0;
-	// biome-ignore lint/suspicious/noExplicitAny: Needed for dynamic handlers
-	const tsserverRequestHandlers = new Map<number, (res: any) => void>();
+	const tsserverRequestHandlers = new Map<number, (res: unknown) => void>();
 
-	/** Not in use at the moment */
-	async function _sendTsServerRequest<T>(command: string, args: unknown[]) {
-		return await new Promise<T | null>((resolve) => {
-			const id = ++seq;
-			tsserverRequestHandlers.set(id, resolve);
-			connection.sendNotification("tsserver/request", [id, command, args]);
-		});
-	}
+	const dispatchToTsserver = (message: string, payload: ApexTypesPayload) => {
+		const id = ++seq;
+		connection.sendNotification("tsserver/request", [id, message, [payload]]);
+		return Promise.resolve(null);
+	};
 
-	connection.onInitialize((_params: InitializeParams): InitializeResult => {
+	let apexService: ApexVirtualTypeService | undefined;
+
+	connection.onInitialize((params: InitializeParams): InitializeResult => {
+		const workspaceRoot = resolveWorkspaceRoot(params);
+
+		apexService = new ApexVirtualTypeService(
+			connection,
+			workspaceRoot,
+			(payload) => dispatchToTsserver("_tatzeroko/updateApexTypes", payload),
+		);
+		void apexService.initialize().catch(() => {});
+
 		return {
 			capabilities: {
 				textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -36,11 +46,53 @@ export const startServer = () => {
 		};
 	});
 
-	connection.onNotification("tsserver/response", ([id, res]) => {
-		tsserverRequestHandlers.get(id)?.(res);
-		tsserverRequestHandlers.delete(id);
+	connection.onShutdown(() => {
+		apexService?.dispose();
+		apexService = undefined;
+	});
+
+	connection.onNotification(
+		"tsserver/response",
+		([id, res]: [number, unknown]) => {
+			tsserverRequestHandlers.get(id)?.(res);
+			tsserverRequestHandlers.delete(id);
+		},
+	);
+
+	connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams) => {
+		void apexService?.handleWatchedFiles(params);
+	});
+
+	documents.onDidChangeContent((event) => {
+		apexService?.handleDocumentChanged(
+			event.document.uri,
+			event.document.getText(),
+		);
+	});
+
+	documents.onDidSave((event) => {
+		apexService?.handleDocumentSaved(
+			event.document.uri,
+			event.document.getText(),
+		);
 	});
 
 	documents.listen(connection);
 	connection.listen();
 };
+
+function resolveWorkspaceRoot(params?: Partial<InitializeParams>) {
+	const initializationOptions = params?.initializationOptions as
+		| { workspaceRoot?: string }
+		| undefined;
+	if (typeof initializationOptions?.workspaceRoot === "string") {
+		return initializationOptions.workspaceRoot;
+	}
+	if (params?.workspaceFolders?.length) {
+		return params.workspaceFolders[0].uri.replace(/^file:\/\//, "");
+	}
+	if (params?.rootUri) {
+		return params.rootUri.replace(/^file:\/\//, "");
+	}
+	return params?.rootPath ?? process.cwd();
+}

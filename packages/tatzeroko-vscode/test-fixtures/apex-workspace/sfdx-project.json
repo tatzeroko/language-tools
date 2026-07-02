@@ -1,0 +1,10 @@
+{
+	"packageDirectories": [
+		{
+			"path": "force-app",
+			"default": true
+		},
+		{ "path": "packages/feature-a" }
+	],
+	"sourceApiVersion": "66.0"
+}
