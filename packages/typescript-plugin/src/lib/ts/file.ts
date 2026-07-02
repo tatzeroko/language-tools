@@ -1,21 +1,36 @@
 import type * as ts from "typescript/lib/tsserverlibrary";
 
-/**
- * Loads a file into the given TypeScript project if it is not already present.
- *
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param project The TypeScript server project instance.
- * @param path The file path to load.
- * @param content The content of the file to load. Used
- */
+type LoadableProject = Pick<
+	ts.server.Project,
+	"containsFile" | "readFile" | "addRoot"
+> & {
+	projectService: Pick<
+		ts.server.ProjectService,
+		"getOrCreateScriptInfoForNormalizedPath"
+	>;
+};
+
+type UnloadableProject = Pick<ts.server.Project, "removeFile"> & {
+	projectService: Pick<ts.server.ProjectService, "getScriptInfo">;
+};
+
+type ScriptInfoWithContent = ts.server.ScriptInfo & {
+	getSnapshot?: () => {
+		getLength: () => number;
+		getText: (start: number, end: number) => string;
+	};
+	editContent?: (start: number, end: number, newText: string) => void;
+};
+
 export function loadFile(
 	typescript: typeof ts,
-	project: ts.server.Project,
+	project: LoadableProject,
 	path: string,
-	content: string,
+	content?: string,
 ) {
 	const normalizedPath = typescript.server.toNormalizedPath(path);
-	if (project.containsFile(normalizedPath)) {
+	const fileContent = content ?? project.readFile(normalizedPath);
+	if (fileContent === undefined) {
 		return;
 	}
 
@@ -23,40 +38,32 @@ export function loadFile(
 		project.projectService.getOrCreateScriptInfoForNormalizedPath(
 			normalizedPath,
 			/*openedByClient*/ true,
-			content,
+			fileContent,
 		);
 
 	if (!scriptInfo) {
 		return;
 	}
 
-	if (!project.projectService.openFiles.has(scriptInfo.path)) {
-		project.projectService.openFiles.set(scriptInfo.path, undefined);
+	const scriptInfoWithContent = scriptInfo as ScriptInfoWithContent;
+	const snapshot = scriptInfoWithContent.getSnapshot?.();
+	const existingText = snapshot?.getText(0, snapshot.getLength()) ?? undefined;
+	if (existingText !== fileContent && scriptInfoWithContent.editContent) {
+		scriptInfoWithContent.editContent(
+			0,
+			snapshot?.getLength() ?? 0,
+			fileContent,
+		);
 	}
 
-	// biome-ignore lint/suspicious/noExplicitAny: Need access to `projectRootPath`
-	if ((project as any).projectRootPath) {
-		/**
-		 * Only add the file to the project if it has a projectRootPath, because else
-		 * a ts.Assert error will be thrown when multiple inferred projects are tried
-		 * to be merged.
-		 */
+	try {
 		project.addRoot(scriptInfo);
-	}
-
-	project.updateGraph();
+	} catch {}
 }
 
-/**
- * Unloads a file from the given TypeScript project if it is present.
- *
- * @param typescript The TypeScript module reference provided by the plugin.
- * @param project The TypeScript server project instance.
- * @param path The file path to unload.
- */
 export function unloadFile(
 	typescript: typeof ts,
-	project: ts.server.Project,
+	project: UnloadableProject,
 	path: string,
 ) {
 	const normalizedPath = typescript.server.toNormalizedPath(path);
@@ -70,7 +77,4 @@ export function unloadFile(
 		/*fileExists*/ false,
 		/*detachFromProject*/ true,
 	);
-	project.projectService.openFiles.delete(scriptInfo.path);
-
-	project.updateGraph();
 }

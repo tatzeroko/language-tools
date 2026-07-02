@@ -26,8 +26,7 @@
 	"contributes": {
 		"typescriptServerPlugins": [
 			{
-				"name": "@tatzeroko/typescript-plugin",
-				"enableForWorkspaceTypeScriptVersions": true
+				"name": "@tatzeroko/typescript-plugin"
 			}
 		]
 	},
@@ -35,13 +34,14 @@
 		"vscode:prepublish": "pnpm run package",
 		"compile": "pnpm run check-types && pnpm run lint && node esbuild.mjs",
 		"build": "pnpm run compile",
+		"test:compile": "tsc -p tsconfig.test.json",
 		"watch": "npm-run-all -p watch:*",
 		"watch:esbuild": "node esbuild.mjs --watch",
 		"watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
 		"package": "pnpm run check-types && pnpm run lint && node esbuild.mjs --production",
 		"check-types": "tsc --noEmit",
 		"lint": "biome check ./src",
-		"test": "vscode-test"
+		"test": "pnpm run test:compile && vscode-test"
 	},
 	"dependencies": {
 		"@tatzeroko/language-server": "workspace:*",
