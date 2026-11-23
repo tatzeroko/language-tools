@@ -1,0 +1,21 @@
+{
+	"name": "@tatzeroko/apex-multiproject-poc",
+	"private": true,
+	"version": "0.0.0",
+	"description": "Opt-in proof of concept: one Apex language server per SFDX project, routed by owning sfdx-project.json. Not part of the extension.",
+	"license": "Apache-2.0",
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"poc": "node scripts/poc.ts"
+	},
+	"dependencies": {
+		"vscode-languageserver-protocol": "^3.17.5"
+	},
+	"devDependencies": {
+		"@types/node": "^25.0.3",
+		"typescript": "^5.9.3",
+		"vitest": "^1.6.1"
+	}
+}
