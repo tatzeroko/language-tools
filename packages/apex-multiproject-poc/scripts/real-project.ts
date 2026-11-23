@@ -226,7 +226,8 @@ try {
 		);
 		const files = listOwnedFiles(p);
 		for (const f of files) {
-			const r: DiagnosticReport = await router.enrichedDiagnosticReport(f);
+			const r: DiagnosticReport =
+				await router.probeOnlyHoverPrimedDiagnosticReport(f);
 			const items = r.items ?? [];
 			if (items.length) withErrors++;
 			total += items.length;
@@ -279,7 +280,7 @@ try {
 			contentChanges: [{ text: probeText }],
 		});
 		await sleep(800);
-		const r = await router.enrichedDiagnosticReport(target);
+		const r = await router.probeOnlyHoverPrimedDiagnosticReport(target);
 		return (r.items ?? [])
 			.map((i) => i.message)
 			.filter((m) => m.includes(foreignClass));

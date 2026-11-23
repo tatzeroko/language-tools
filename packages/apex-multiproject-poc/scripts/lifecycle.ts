@@ -119,7 +119,7 @@ const allPids = [instances.root.pid as number, instances.nested.pid as number];
 try {
 	// ---- L1: edits and stale diagnostics -------------------------------------------------
 	console.log("\n== L1 edits / stale diagnostics");
-	const pullE = (f: string) => router.enrichedDiagnosticReport(f);
+	const pullE = (f: string) => router.probeOnlyHoverPrimedDiagnosticReport(f);
 	const has = (r: DiagnosticReport, re: RegExp) =>
 		msgs(r).some((m) => re.test(m));
 	check(

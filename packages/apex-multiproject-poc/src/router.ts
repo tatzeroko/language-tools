@@ -67,11 +67,11 @@ export class ApexRouter {
 	}
 
 	/**
-	 * Workaround for a server limitation: semantic diagnostics are only produced for a document
-	 * version after a hover/definition/completion has enriched it (a bare pull returns a
-	 * "full" report with no items). A hover at (0,0) triggers that enrichment.
+	 * PROBE-ONLY, not a product path: semantic diagnostics appear only after a cursor-style request
+	 * (hover/definition/codeLens/references) has compiled the document. Kept for the real-project
+	 * scripts; the host's legitimate editor-style trigger is `ApexServerInstance.editorRefresh`.
 	 */
-	async enrichedDiagnosticReport(file: string) {
+	async probeOnlyHoverPrimedDiagnosticReport(file: string) {
 		await this.instanceFor(file).connection.sendRequest("textDocument/hover", {
 			textDocument: { uri: pathToFileURL(file).toString() },
 			position: { line: 0, character: 0 },

@@ -8,14 +8,23 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"poc": "node scripts/poc.ts"
+		"poc": "node scripts/poc.ts",
+		"prepare:server": "node scripts/prepare-desktop.ts",
+		"ext:build": "esbuild vscode-ext/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=vscode-ext/out/extension.cjs",
+		"ext:package": "npm run ext:build && mkdir -p out && cd vscode-ext && vsce package --no-dependencies --allow-missing-repository --skip-license -o ../out/tatzeroko-apex-multiproject-experimental.vsix",
+		"ext:install": "code --install-extension out/tatzeroko-apex-multiproject-experimental.vsix --force",
+		"ext:uninstall": "code --uninstall-extension tatzeroko-poc.tatzeroko-apex-multiproject-experimental"
 	},
 	"dependencies": {
+		"fflate": "^0.8.3",
 		"vscode-languageserver-protocol": "^3.17.5"
 	},
 	"devDependencies": {
 		"@types/node": "^25.0.3",
+		"@types/vscode": "^1.90.0",
 		"typescript": "^5.9.3",
-		"vitest": "^1.6.1"
+		"vitest": "^1.6.1",
+		"esbuild": "^0.25.0",
+		"@vscode/vsce": "^3.2.0"
 	}
 }

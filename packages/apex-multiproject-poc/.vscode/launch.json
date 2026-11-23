@@ -1,0 +1,14 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Tatzeroko Apex PoC: Extension Host (open the monorepo as workspace)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode-ext", "${input:monorepo}"],
+			"outFiles": ["${workspaceFolder}/vscode-ext/out/**/*.cjs"],
+			"preLaunchTask": "ext:build"
+		}
+	],
+	"inputs": [{ "id": "monorepo", "type": "promptString", "description": "Absolute path of the Salesforce monorepo root" }]
+}
