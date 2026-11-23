@@ -1,0 +1,4 @@
+{
+	"version": "2.0.0",
+	"tasks": [{ "label": "ext:build", "type": "npm", "script": "ext:build", "path": ".", "problemMatcher": [] }]
+}

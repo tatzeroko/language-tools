@@ -1,0 +1,101 @@
+{
+	"name": "tatzeroko-apex-multiproject-experimental",
+	"displayName": "Tatzeroko Apex Multi-Project (experimental PoC)",
+	"publisher": "tatzeroko-poc",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"license": "Apache-2.0",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"main": "./out/extension.cjs",
+	"activationEvents": [
+		"onLanguage:apex",
+		"workspaceContains:**/sfdx-project.json"
+	],
+	"contributes": {
+		"commands": [
+			{
+				"command": "tatzeroko.apexMultiProject.showLog",
+				"title": "Tatzeroko (experimental): Show Apex multi-project log"
+			},
+			{
+				"command": "tatzeroko.apexMultiProject.status",
+				"title": "Tatzeroko (experimental): Apex multi-project status"
+			},
+			{
+				"command": "tatzeroko.apexMultiProject.restartProject",
+				"title": "Tatzeroko (experimental): Restart Apex server for a project"
+			},
+			{
+				"command": "tatzeroko.apexMultiProject.selfTest",
+				"title": "Tatzeroko (experimental): Apex multi-project self-test (internal)"
+			},
+			{
+				"command": "tatzeroko.apexMultiProject.restartAll",
+				"title": "Tatzeroko (experimental): Stop all Apex servers"
+			}
+		],
+		"configuration": {
+			"title": "Tatzeroko experimental Apex multi-project",
+			"properties": {
+				"tatzeroko.experimental.apexMultiProject.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Run one Apex language server per nested Salesforce DX project. Experimental; off by default."
+				},
+				"tatzeroko.experimental.apexMultiProject.engine": {
+					"type": "string",
+					"enum": [
+						"typescript",
+						"jorje"
+					],
+					"default": "typescript"
+				},
+				"tatzeroko.experimental.apexMultiProject.scope": {
+					"type": "string",
+					"enum": [
+						"nested",
+						"all"
+					],
+					"default": "nested",
+					"description": "nested: serve only nested projects (the root project stays with the Salesforce extension). all: serve every project including the root (duplicate providers if Salesforce Apex is active)."
+				},
+				"tatzeroko.experimental.apexMultiProject.diagnostics": {
+					"type": "boolean",
+					"default": false,
+					"description": "Publish diagnostics from the experimental servers. Off by default (noisy on real projects)."
+				},
+				"tatzeroko.experimental.apexMultiProject.maxActiveProjects": {
+					"type": "number",
+					"default": 4
+				},
+				"tatzeroko.experimental.apexMultiProject.typescriptServerDir": {
+					"type": "string",
+					"default": "",
+					"description": "Absolute path of the extracted pinned TypeScript Apex server's `extension` directory (must contain dist/server.node.js). Run `npm run prepare:server` in the PoC package to download, SHA-256 verify and print it. Never bundled."
+				},
+				"tatzeroko.experimental.apexMultiProject.jorjeJar": {
+					"type": "string",
+					"default": "",
+					"description": "Jorje engine only. Path to an apex-jorje-lsp.jar. Empty = auto-detect the JAR inside the installed official Salesforce Apex extension (read in place, never copied)."
+				},
+				"tatzeroko.experimental.apexMultiProject.javaPath": {
+					"type": "string",
+					"default": "",
+					"description": "Jorje engine only. Path to the java executable. Empty = use salesforcedx-vscode-apex java.home, then JAVA_HOME, then `java` on PATH."
+				}
+			}
+		}
+	},
+	"description": "Experimental, opt-in: one Apex language server per nested Salesforce DX project. Companion to the official Salesforce extensions. Not published.",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/tatzeroko/language-tools"
+	},
+	"extensionDependencies": [],
+	"extensionKind": [
+		"workspace"
+	]
+}
